@@ -47,6 +47,23 @@ export function createUserPreset(
  * Normalizes imported older JSON configs cleanly by filling in any missing base/louvers fields.
  */
 export function normalizeLampConfig(partial: LampConfig): LampConfig {
+  const rawWovenPattern = partial.woven?.pattern as string | undefined;
+  const safeWovenPattern =
+    rawWovenPattern === 'basket_1x1' ||
+    rawWovenPattern === 'knitted' ||
+    rawWovenPattern === 'ripple_mesh' ||
+    rawWovenPattern === 'grid_mesh'
+      ? rawWovenPattern
+      : 'basket_1x1';
+
+  const rawOrganicMode = partial.organic?.mode as string | undefined;
+  const safeOrganicMode =
+    rawOrganicMode === 'flames' || rawOrganicMode === 'gravity'
+      ? rawOrganicMode
+      : rawOrganicMode === 'ribbons' || rawOrganicMode === 'topo' || rawOrganicMode === 'sculpt'
+        ? 'gravity'
+        : 'flames';
+
   return {
     ...cloneConfig(DEFAULT_CONFIG),
     ...partial,
@@ -57,9 +74,11 @@ export function normalizeLampConfig(partial: LampConfig): LampConfig {
     japaneseFlute: { ...DEFAULT_CONFIG.japaneseFlute, ...(partial.japaneseFlute ?? {}) },
     helical: { ...DEFAULT_CONFIG.helical, ...(partial.helical ?? {}) },
     louvers: { ...DEFAULT_CONFIG.louvers, ...(partial.louvers ?? {}) },
-    woven: { ...DEFAULT_CONFIG.woven, ...(partial.woven ?? {}) },
-    organic: { ...DEFAULT_CONFIG.organic, ...(partial.organic ?? {}) },
+    origami: { ...DEFAULT_CONFIG.origami, ...(partial.origami ?? {}) },
+    woven: { ...DEFAULT_CONFIG.woven, ...(partial.woven ?? {}), pattern: safeWovenPattern },
+    organic: { ...DEFAULT_CONFIG.organic, ...(partial.organic ?? {}), mode: safeOrganicMode },
     visual: { ...DEFAULT_CONFIG.visual, ...(partial.visual ?? {}) },
+    sculptStrokes: Array.isArray(partial.sculptStrokes) ? [...partial.sculptStrokes] : [],
   };
 }
 

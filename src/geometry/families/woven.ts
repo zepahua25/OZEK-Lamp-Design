@@ -12,75 +12,91 @@ function smoothstep(e0: number, e1: number, x: number): number {
 
 /**
  * Smooth, broad-crested rounded wicker strip profile across a single strip's horizontal span s in [0, 1].
- * Rises gently from 0 at the crossing seam (s=0), holds a wide rounded arch across the middle
- * (NO pointy spikes!), and tucks smoothly back to 0 at s=1.
  */
 function roundedStripLengthProfile(sRaw: number, fullness: number): number {
   const s = ((sRaw % 1) + 1) % 1;
-  // sin(PI * s) is 0 at ends, 1 at center; raising to power < 1 flattens & broadens the top into a smooth ribbon!
   const baseSin = Math.sin(s * Math.PI);
-  // Blend between smooth cosine arch and broad flat-crested super-arch
   const broadExp = clamp(0.42 + (1 - fullness) * 0.35, 0.35, 0.8);
   const arch = Math.pow(Math.max(0, baseSin), broadExp);
-  // Subtle C1 tuck easing right at the crossing edge so adjacent strips weave smoothly underneath
   const tuck = smoothstep(0.0, 0.14, s) * (1 - smoothstep(0.86, 1.0, s));
   return arch * (0.25 + 0.75 * tuck);
 }
 
 /**
  * Smooth rounded vertical cross-section of a horizontal wicker reed across row fraction t in [0, 1].
- * Shaped like a rounded half-oval / D-rod (softly chamfered at bottom/top edges for clean FDM printing < 45°).
  */
 function roundedReedCrossSection(tRaw: number, fdmSmooth: number): number {
   const t = ((tRaw % 1) + 1) % 1;
-  // Centered coordinate d in [-1, 1]
   const d = t * 2 - 1;
-  // Super-elliptical rounded reed profile: smooth convex top, zero sharp points, printable flank slope!
-  const roundness = 1.65 + (1 - fdmSmooth) * 0.65; // ~1.65..2.30 -> plush rounded reed
+  const roundness = 1.65 + (1 - fdmSmooth) * 0.65;
   const core = Math.pow(Math.max(0, 1 - Math.pow(Math.abs(d), roundness)), 0.58);
-  // Soft seam groove between stacked rows so rows read as distinct woven courses without sharp crevices
   const seamEase = smoothstep(0.0, 0.12, t) * (1 - smoothstep(0.88, 1.0, t));
   return core * (0.2 + 0.8 * seamEase);
 }
 
 /**
- * Estilo 4: Tejida / Basketweave (True elongated rounded wicker/rattan strips — zero pineapple spikes!).
- * - Completely smooth, continuous inner wall (`innerFollow: 0`).
- * - Outer wall sculpts alternating elongated rounded horizontal reeds:
- *   minimum 0.8 mm thickness in translucent valleys -> 2.2 mm (default) at rounded strip crests!
- * - High radial and vertical mesh density so every curve renders silky-smooth up close.
+ * Estilo 6: Tejida / Textil 3D — 4 Real 3D FDM-Printable Sub-Patterns (all <= 45°, 0% supports, smooth inner wall):
+ *  1. `basket_1x1`  ("Mimbre / Basketweave"): elongated rounded horizontal reeds alternating per row (0.8 -> 2.2 mm).
+ *  2. `knitted`     ("Punto / Knitted Estambre"): vertical columns of rounded V-shaped chevron knit loops (0.8 -> 2.2 mm).
+ *  3. `ripple_mesh` ("RippleMesh Celda profunda"): bold sculpted sinusoidal arches (~2.4 mm crests, 3.5–6.5 mm deep,
+ *                   24–44 radial × 18–32 rows) surrounding ultra-thin ~0.65 mm translucent light cells at <= 45°.
+ *  4. `grid_mesh`   ("Rejilla / Grid"): architectural orthogonal ribs & 45°-beveled horizontal rings framing
+ *                   glowing ~0.65 mm translucent square windows (black/luminous lattice lamp reference).
  */
 export const wovenFamily: LampFamilyDefinition = {
   id: 'woven',
-  name: 'Tejida / Basketweave',
+  name: 'Tejida / Textil & Celda',
   shortName: 'Tejida',
-  tagline: 'Tiras alargadas y redondeadas tipo mimbre/canasta con pared interior lisa',
+  tagline: 'Mimbre, Punto (Knitted), RippleMesh profundo y Rejilla luminosa con pared interior lisa',
 
   getResolution(config: LampConfig, draft: boolean) {
-    const hf = Math.round(config.woven.horizFreq);
-    const vf = Math.round(config.woven.vertFreq);
-    // High resolution (10-12 verts per horizontal strip, 5-6 vertical verts per reed course)
-    // so curved wicker arches have ZERO flat facets when zooming in!
+    const isCellMode =
+      config.woven.pattern === 'ripple_mesh' || config.woven.pattern === 'grid_mesh';
+    const hf = isCellMode
+      ? Math.round(clamp(config.woven.horizFreq, 24, 44))
+      : Math.round(clamp(config.woven.horizFreq, 16, 72));
+    const vf = isCellMode
+      ? Math.round(clamp(config.woven.vertFreq, 18, 32))
+      : Math.round(clamp(config.woven.vertFreq, 24, 90));
+
+    // High final resolution (>= 280 radial × >= 200 vertical) so Knitted V-stitches,
+    // deep RippleMesh arches, and Grid windows export razor-sharp in STL!
     const radialSegs = draft
-      ? Math.min(200, Math.max(140, hf * 5))
-      : Math.min(440, Math.max(320, hf * 10));
+      ? Math.min(208, Math.max(152, hf * 5))
+      : Math.min(440, Math.max(288, hf * 10));
     const heightSegs = draft
-      ? Math.min(130, Math.max(96, vf * 2))
-      : Math.min(300, Math.max(220, vf * 5));
+      ? Math.min(140, Math.max(104, vf * 3))
+      : Math.min(300, Math.max(208, vf * 7));
     return { radialSegs, heightSegs };
   },
 
   createEvaluator(config: LampConfig) {
-    const { horizFreq, vertFreq, relief, pattern, fdmSmoothing } = config.woven;
-    // Note: elongated basketweave strips have fewer horizontal strands than vertical rows (e.g. 28-44 × 48-76)
-    const hf = Math.max(16, Math.min(72, Math.round(horizFreq)));
-    const vf = Math.max(24, Math.min(90, Math.round(vertFreq)));
+    const { horizFreq, vertFreq, relief, rippleDepth, pattern, fdmSmoothing } = config.woven;
     const smooth = clamp(fdmSmoothing, 0, 1);
 
-    // Exact requested FDM translucent basketweave wall profile:
-    // 0.8 mm minimum in valleys (lets warm light pass cleanly!) -> 0.8 + relief (default 1.4 -> 2.2 mm at crests!)
-    const MIN_VALLEY_WALL_MM = 0.8;
-    const effectiveReliefMm = clamp(relief, 0.6, 2.8);
+    const isRipple = pattern === 'ripple_mesh';
+    const isGrid = pattern === 'grid_mesh';
+    const isCellMode = isRipple || isGrid;
+
+    // Dedicated sculpted cell ranges for RippleMesh & Grid: 24–44 radial × 18–32 rows, 3.5–6.5 mm depth
+    const hf = isCellMode
+      ? Math.max(24, Math.min(44, Math.round(horizFreq)))
+      : Math.max(16, Math.min(72, Math.round(horizFreq)));
+    const vf = isCellMode
+      ? Math.max(18, Math.min(32, Math.round(vertFreq)))
+      : Math.max(24, Math.min(90, Math.round(vertFreq)));
+
+    const minValleyWallMm = isCellMode ? 0.65 : 0.8;
+    const requestedDepthMm = isCellMode
+      ? clamp(rippleDepth ?? 4.8, 3.5, 6.5)
+      : clamp(relief, 0.6, 2.8);
+
+    // For deep RippleMesh / Grid, respect <= 45° vertical flank printability relative to physical row height!
+    const rowHeightMm = Math.max(3.5, config.silhouette.height / vf);
+    const max45DepthMm = Math.max(3.5, rowHeightMm * 0.92);
+    const effectiveDepthMm = isCellMode
+      ? Math.min(requestedDepthMm, max45DepthMm)
+      : requestedDepthMm;
 
     return (ctx: DisplacementContext): DisplacementResult => {
       const uCell = ctx.u * hf;
@@ -91,48 +107,81 @@ export const wovenFamily: LampFamilyDefinition = {
 
       let weave01 = 0;
 
-      if (pattern === 'basket_1x1') {
-        // Authentic alternating brick-staggered wicker / basketweave (mimbre)
-        // Row A: elongated rounded horizontal strip; Row B: shifted half a strip length (0.5)
+      if (pattern === 'knitted') {
+        // --- SUBMODO B: PUNTO / KNITTED (ESTAMBRE) ---
+        const uF = ((uCell % 1) + 1) % 1;
+        const dx = uF * 2 - 1;
+        const absDx = Math.abs(dx);
+
+        const vSkew = 0.56 * absDx;
+        const vStitch = ((vCell - vSkew) % 1 + 1) % 1;
+
+        const yarnRoundExp = 0.56 + smooth * 0.28;
+        const yarnProfile = Math.pow(Math.max(0, Math.sin(vStitch * Math.PI)), yarnRoundExp);
+        const columnGroove = smoothstep(0.0, 0.2, 1.0 - absDx);
+        const centerVCrease = 0.28 + 0.72 * smoothstep(0.0, 0.22, absDx);
+        const tuckWave = 0.88 + 0.12 * Math.sin(vStitch * Math.PI * 2 + (dx < 0 ? 0.45 : -0.45));
+
+        weave01 = clamp(yarnProfile * columnGroove * centerVCrease * tuckWave, 0, 1);
+      } else if (isRipple) {
+        // --- SUBMODO C: RIPPLEMESH PROFUNDO (CELDA ESCULPIDA 3.5–6.5 mm, VALLE ~0.65 mm) ---
+        // Bold counter-phased continuous sinusoidal arches (~2.4 mm crest width) framing deep sculpted
+        // luminous cells (~0.65 mm translucent center) with smooth <= 45° printable sloped walls!
+        const uAngle = uCell * Math.PI * 2;
+        const waveAmp = 0.36;
+        const vWaveA = vCell + waveAmp * Math.sin(uAngle);
+        const vWaveB = vCell - waveAmp * Math.sin(uAngle);
+
+        // Distance from exact arch centerline: 0 on crest, 1 at exact cell center
+        const distA = Math.abs(Math.sin(vWaveA * Math.PI));
+        const distB = Math.abs(Math.sin(vWaveB * Math.PI));
+
+        // Broad rounded arch shoulder (~2.4 mm wide crest) dropping cleanly at <= 45° into the ~0.65 mm cell eye
+        const archWidth = 0.42 + smooth * 0.12;
+        const archA = 1.0 - smoothstep(0.14, 0.14 + archWidth, distA);
+        const archB = 1.0 - smoothstep(0.14, 0.14 + archWidth, distB);
+
+        // Slight diagonal pillowing at crossings makes the lattice look sculpted & plush (amber/blue reference!)
+        const rawLattice = Math.max(archA, archB) + 0.18 * archA * archB;
+        weave01 = clamp(Math.pow(clamp(rawLattice, 0, 1), 0.92), 0, 1);
+      } else if (isGrid) {
+        // --- SUBMODO D: REJILLA / GRID (LÁMPARA NEGRA DE VENTANAS LUMINOSAS) ---
+        // Orthogonal architectural cage: crisp vertical mullions + 45°-chamfered horizontal rings
+        // surrounding ~0.65 mm translucent square windows!
+        const uF = ((uCell % 1) + 1) % 1;
+        const dU = Math.abs(uF * 2 - 1); // 0 at vertical window center, 1 at vertical rib center
+        const dV = Math.abs(vFrac * 2 - 1); // 0 at horizontal window center, 1 at horizontal ring center
+
+        // Vertical rib: sturdy ~2.4 mm pillar with crisp rounded shoulder
+        const vRib = smoothstep(0.46 - smooth * 0.08, 0.78, dU);
+        // Horizontal ring: 45° chamfered bottom & top ramps so zero supports are needed!
+        const hRing = smoothstep(0.36 - smooth * 0.08, 0.84, dV);
+
+        // Soft corner fillet where vertical & horizontal bars meet (rounded square window!)
+        const cornerFillet = smoothstep(0.68, 1.08, Math.hypot(dU, dV));
+        const cage = Math.max(vRib, hRing * 0.92, cornerFillet * 0.85);
+        weave01 = clamp(cage, 0, 1);
+      } else {
+        // --- SUBMODO A: MIMBRE (BASKETWEAVE) ---
         const uShifted = uCell + ((rowIdx & 1) === 0 ? 0.0 : 0.5);
         const stripArch = roundedStripLengthProfile(uShifted, 0.72);
         const reedSection = roundedReedCrossSection(vFrac, smooth);
 
-        // Subtle vertical warp binder visible in the tucked gaps between horizontal reeds
         const warpPhase = uShifted + 0.5;
-        const warpRibbon = Math.pow(Math.max(0, Math.sin((((warpPhase % 1) + 1) % 1) * Math.PI)), 1.3);
+        const warpRibbon = Math.pow(
+          Math.max(0, Math.sin((((warpPhase % 1) + 1) % 1) * Math.PI)),
+          1.3
+        );
         const underWarp = 0.22 * warpRibbon * (1 - stripArch * 0.75);
 
         weave01 = clamp(stripArch * reedSection + underWarp, 0, 1);
-      } else if (pattern === 'twill') {
-        // Diagonal 2/1 woven textile twill (each course shifts smoothly by 1/3 strip width)
-        const uShifted = uCell + rowIdx * 0.3333;
-        const stripArch = roundedStripLengthProfile(uShifted, 0.78);
-        const reedSection = roundedReedCrossSection(vFrac, smooth);
-        const underWarp = 0.18 * (1 - stripArch);
-        weave01 = clamp(stripArch * reedSection + underWarp, 0, 1);
-      } else if (pattern === 'double_2x2') {
-        // Paired double-reed rattan basketweave (2 parallel reeds share phase, then alternate)
-        const pairIdx = Math.floor(rowIdx / 2);
-        const uShifted = uCell + ((pairIdx & 1) === 0 ? 0.0 : 0.5);
-        const stripArch = roundedStripLengthProfile(uShifted, 0.8);
-        const reedSection = roundedReedCrossSection(vFrac, smooth);
-        const underWarp = 0.2 * (1 - stripArch * 0.8);
-        weave01 = clamp(stripArch * reedSection + underWarp, 0, 1);
-      } else {
-        // 'diamond' — soft rounded woven chevron / diamond rattan strips (zero sharp points!)
-        const halfA = roundedStripLengthProfile(uCell + vCell * 0.5, 0.65);
-        const halfB = roundedStripLengthProfile(uCell - vCell * 0.5, 0.65);
-        const reedSection = roundedReedCrossSection(vFrac, smooth);
-        weave01 = clamp(Math.max(halfA, halfB) * (0.35 + 0.65 * reedSection), 0, 1);
       }
 
       // Gently solidify the top 3 mm rim into a neat rounded binding collar so top edge prints strong
       const topRimBlend = smoothstep(0.96, 1.0, ctx.v);
-      const finalWeave01 = weave01 * (1 - topRimBlend) + 0.75 * topRimBlend;
+      const finalWeave01 = weave01 * (1 - topRimBlend) + 0.72 * topRimBlend;
 
-      // Exact wall thickness: 0.8 mm in valleys -> 0.8 + relief (2.2 mm default) on crests
-      const wallThicknessMm = MIN_VALLEY_WALL_MM + finalWeave01 * effectiveReliefMm;
+      const wallThicknessMm = minValleyWallMm + finalWeave01 * effectiveDepthMm;
 
       return {
         outerOffset: 0,

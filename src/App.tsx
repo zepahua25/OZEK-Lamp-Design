@@ -6,9 +6,19 @@ import {
   LampFamilyId,
   LampMetrics,
   LampPreset,
+  LampSizePreset,
+  MaterialPresetId,
+  SculptStroke,
+  SculptToolId,
+  UiMode,
   ViewAssemblyMode,
 } from './types/lamp';
-import { CURATED_PRESETS, DEFAULT_CONFIG, cloneConfig } from './data/presets';
+import {
+  CURATED_PRESETS,
+  DEFAULT_CONFIG,
+  applySizePreset,
+  cloneConfig,
+} from './data/presets';
 import { shuffleLampConfig } from './data/randomizer';
 import {
   createUserPreset,
@@ -19,7 +29,13 @@ import {
   saveUserPresets,
 } from './data/collections';
 import { generateLampGeometry } from './geometry/solidBuilder';
-import { exportPartToBinarySTL, triggerBinaryDownload } from './geometry/stlExport';
+import { SILHOUETTE_SPLINE_TEMPLATES } from './geometry/silhouette';
+import { generateAdapterE27ToLed001 } from './geometry/mounts/adapterE27ToLed001';
+import {
+  buildLampZipPackage,
+  exportPartToBinarySTL,
+  triggerBinaryDownload,
+} from './geometry/stlExport';
 import type { WorkerRequest, WorkerResponse } from './geometry/worker';
 import { LampScene } from './viewer/LampScene';
 import { TopBar } from './ui/TopBar';
@@ -27,6 +43,8 @@ import { BottomTelemetry } from './ui/BottomTelemetry';
 import { ViewportTools } from './ui/ViewportTools';
 import { RightPanel } from './ui/RightPanel';
 import { CollectionDrawer } from './ui/CollectionDrawer';
+import { OzekCollectionPanel } from './ui/OzekCollectionPanel';
+import type { OzekSignaturePiece } from './data/ozekCollection';
 
 function slugify(str: string): string {
   return str
@@ -37,6 +55,7 @@ function slugify(str: string): string {
 
 export const App: React.FC = () => {
   const [config, setConfig] = useState<LampConfig>(() => cloneConfig(DEFAULT_CONFIG));
+  const [uiMode, setUiMode] = useState<UiMode>('basic');
   const [metrics, setMetrics] = useState<LampMetrics | null>(null);
   const [isBusy, setIsBusy] = useState<boolean>(false);
   const [isExporting, setIsExporting] = useState<boolean>(false);
@@ -45,6 +64,10 @@ export const App: React.FC = () => {
   const [collectionsOpen, setCollectionsOpen] = useState<boolean>(false);
   const [userPresets, setUserPresets] = useState<LampPreset[]>(() => loadUserPresets());
   const [toast, setToast] = useState<string | null>(null);
+  const [activeOzekPieceId, setActiveOzekPieceId] = useState<string | null>(null);
+  const [sculptTool, setSculptTool] = useState<SculptToolId>('off');
+  const [sculptRadiusMm, setSculptRadiusMm] = useState<number>(28);
+  const [sculptStrength, setSculptStrength] = useState<number>(0.55);
 
   const canvasHostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<LampScene | null>(null);
@@ -60,7 +83,7 @@ export const App: React.FC = () => {
   const showToast = useCallback((msg: string) => {
     setToast(msg);
     if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
-    toastTimerRef.current = window.setTimeout(() => setToast(null), 3200);
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 3500);
   }, []);
 
   const dispatchGeometryBuild = useCallback((cfg: LampConfig, draft: boolean) => {
@@ -170,10 +193,23 @@ export const App: React.FC = () => {
 
   const handleSelectFamily = useCallback(
     (family: LampFamilyId) => {
+      setActiveOzekPieceId(null);
       const curated = CURATED_PRESETS.find((p) => p.config.family === family);
       setConfig((prev) => {
         const base = curated ? cloneConfig(curated.config) : cloneConfig(prev);
         base.family = family;
+        if (family === 'organic') {
+          const spherePts = SILHOUETTE_SPLINE_TEMPLATES.sphere.points.map((pt) => ({ ...pt }));
+          base.silhouette.type = 'custom_spline';
+          base.silhouette.controlPoints = spherePts;
+          base.silhouette.baseRadius = spherePts[0].r;
+          base.silhouette.midRadius = spherePts[2].r;
+          base.silhouette.topRadius = spherePts[4].r;
+          base.silhouette.height = 172;
+          base.silhouette.skirtWaveAmp = 0;
+          base.silhouette.closeTopDome = true; // Closed full sphere by default for Organic Sphere!
+        }
+        base.sculptStrokes = prev.sculptStrokes ?? [];
         base.visual.showOverhangs = prev.visual.showOverhangs;
         base.visual.overhangAngle = prev.visual.overhangAngle;
         base.visual.sceneTheme = prev.visual.sceneTheme;
@@ -181,6 +217,87 @@ export const App: React.FC = () => {
         latestConfigRef.current = base;
         dispatchGeometryBuild(base, false);
         return base;
+      });
+    },
+    [dispatchGeometryBuild]
+  );
+
+  const handleSelectOzekPiece = useCallback(
+    (piece: OzekSignaturePiece) => {
+      setActiveOzekPieceId(piece.id);
+      const next = cloneConfig(piece.config);
+      next.visual.sceneTheme = latestConfigRef.current.visual.sceneTheme;
+      setConfig(next);
+      latestConfigRef.current = next;
+      dispatchGeometryBuild(next, false);
+      showToast(`Colección OZ☰K: ${piece.code} · ${piece.title}`);
+    },
+    [dispatchGeometryBuild, showToast]
+  );
+
+  const handleApplyOzekColor = useCallback(
+    (target: 'shade' | 'base', material: MaterialPresetId) => {
+      handleChangeVisual((prev) => ({
+        ...prev,
+        visual:
+          target === 'shade'
+            ? { ...prev.visual, material }
+            : { ...prev.visual, baseMaterial: material },
+      }));
+    },
+    [handleChangeVisual]
+  );
+
+  const handleSculptStroke = useCallback(
+    (stroke: SculptStroke) => {
+      setConfig((prev) => {
+        const nextStrokes = [...(prev.sculptStrokes ?? []), stroke].slice(-80);
+        const next = { ...prev, sculptStrokes: nextStrokes };
+        latestConfigRef.current = next;
+        scheduleDraftBuild(next);
+        return next;
+      });
+    },
+    [scheduleDraftBuild]
+  );
+
+  const handleUndoSculpt = useCallback(() => {
+    setConfig((prev) => {
+      const nextStrokes = (prev.sculptStrokes ?? []).slice(0, -1);
+      const next = { ...prev, sculptStrokes: nextStrokes };
+      latestConfigRef.current = next;
+      dispatchGeometryBuild(next, false);
+      return next;
+    });
+  }, [dispatchGeometryBuild]);
+
+  const handleClearSculpt = useCallback(() => {
+    setConfig((prev) => {
+      const next = { ...prev, sculptStrokes: [] };
+      latestConfigRef.current = next;
+      dispatchGeometryBuild(next, false);
+      return next;
+    });
+    showToast('Trazos de esculpido eliminados');
+  }, [dispatchGeometryBuild, showToast]);
+
+  useEffect(() => {
+    sceneRef.current?.setSculptBrush(
+      sculptTool,
+      sculptRadiusMm,
+      sculptStrength,
+      handleSculptStroke,
+      handleCommitGeometry
+    );
+  }, [sculptTool, sculptRadiusMm, sculptStrength, handleSculptStroke, handleCommitGeometry]);
+
+  const handleApplySizePreset = useCallback(
+    (size: LampSizePreset) => {
+      setConfig((prev) => {
+        const scaled = applySizePreset(prev, size);
+        latestConfigRef.current = scaled;
+        dispatchGeometryBuild(scaled, false);
+        return scaled;
       });
     },
     [dispatchGeometryBuild]
@@ -219,13 +336,17 @@ export const App: React.FC = () => {
           );
         } else {
           for (const part of res.parts) {
-            const stl = exportPartToBinarySTL(part);
-            const suffix = part.name === 'base' ? `base_${cfg.base.style}` : 'pantalla';
+            const flipTripod = part.name === 'base' && cfg.base.style === 'tripod';
+            const stl = exportPartToBinarySTL(part, { flipUpsideDown: flipTripod });
+            const suffix =
+              part.name === 'base'
+                ? `Base_${cfg.base.style}`
+                : part.name === 'diffuser'
+                  ? 'Difusor'
+                  : 'Pantalla';
             triggerBinaryDownload(stl, `${baseName}_${suffix}.stl`);
           }
-          showToast(
-            `Exportados 2 STL (Base ${Math.round(res.metrics.baseGramsPLA)}g + Pantalla ${Math.round(res.metrics.shadeGramsPLA)}g)`
-          );
+          showToast(`Exportados ${res.parts.length} STL listos para Bambu Studio`);
         }
       } catch (err) {
         console.error(err);
@@ -237,7 +358,7 @@ export const App: React.FC = () => {
   }, [showToast]);
 
   const handleExportPartSTL = useCallback(
-    (targetRole: 'base' | 'shade') => {
+    (targetRole: 'base' | 'shade' | 'diffuser') => {
       setIsExporting(true);
       window.setTimeout(() => {
         try {
@@ -245,17 +366,23 @@ export const App: React.FC = () => {
           const res = generateLampGeometry(cfg, { draft: false, validateManifold: true });
           const part = res.parts.find((p) => p.role === targetRole);
           if (!part) return;
-          const stl = exportPartToBinarySTL(part);
+          const flipTripod = targetRole === 'base' && cfg.base.style === 'tripod';
+          const stl = exportPartToBinarySTL(part, { flipUpsideDown: flipTripod });
           const tag =
             targetRole === 'base'
-              ? `OZEK_base_${cfg.base.style}_${cfg.base.coupling}.stl`
-              : `OZEK_pantalla_${slugify(cfg.family)}_${cfg.base.coupling}.stl`;
+              ? `OZEK_Base_${cfg.base.style}_${cfg.base.coupling}.stl`
+              : targetRole === 'diffuser'
+                ? `OZEK_Difusor_1mm.stl`
+                : `OZEK_Pantalla_${slugify(cfg.family)}_${cfg.base.coupling}.stl`;
           triggerBinaryDownload(stl, tag);
           const grams =
             targetRole === 'base'
               ? Math.round(res.metrics.baseGramsPLA)
-              : Math.round(res.metrics.shadeGramsPLA);
-          showToast(`Exportado ${tag} (${grams} g PLA · Z-up mm)`);
+              : targetRole === 'diffuser'
+                ? Math.round(res.metrics.diffuserGramsPLA)
+                : Math.round(res.metrics.shadeGramsPLA);
+          const flipNote = flipTripod ? ' · volteado 180° sin soportes' : '';
+          showToast(`Exportado ${tag} (${grams} g PLA · Z-up mm${flipNote})`);
         } catch (err) {
           console.error(err);
           showToast('Error al exportar pieza STL');
@@ -267,6 +394,54 @@ export const App: React.FC = () => {
     [showToast]
   );
 
+  const handleExportAdapterSTL = useCallback(() => {
+    setIsExporting(true);
+    window.setTimeout(() => {
+      try {
+        const cfg = latestConfigRef.current;
+        const adapter = generateAdapterE27ToLed001(cfg.mount);
+        const stl = exportPartToBinarySTL(adapter.part);
+        const filename = `OZEK_Adaptador_E27_a_LED001.stl`;
+        triggerBinaryDownload(stl, filename);
+        showToast(
+          `Adaptador E27 ↔ LED 001 exportado (${Math.round(adapter.gramsPLA)} g PLA · 0% soportes)`
+        );
+      } catch (err) {
+        console.error(err);
+        showToast('Error al exportar adaptador');
+      } finally {
+        setIsExporting(false);
+      }
+    }, 30);
+  }, [showToast]);
+
+  const handleExportZipPackage = useCallback(() => {
+    setIsExporting(true);
+    window.setTimeout(() => {
+      try {
+        const cfg = latestConfigRef.current;
+        const keepMountAtBottom =
+          cfg.mount.position === 'top' && cfg.mount.autoFlipPendantExport;
+        const res = generateLampGeometry(cfg, {
+          draft: false,
+          validateManifold: true,
+          keepMountAtBottom,
+        });
+        const slug = `OZEK_${slugify(cfg.family)}`;
+        const zipBuf = buildLampZipPackage(cfg, res.parts, res.metrics, slug);
+        triggerBinaryDownload(zipBuf, `${slug}_Paquete_BambuStudio.zip`);
+        showToast(
+          `Paquete .ZIP descargado (${res.parts.length} STL + ajustes_bambu_studio.txt)`
+        );
+      } catch (err) {
+        console.error(err);
+        showToast('Error al generar paquete .ZIP');
+      } finally {
+        setIsExporting(false);
+      }
+    }, 30);
+  }, [showToast]);
+
   const handleExportTestBaseSTL = useCallback(() => {
     setIsExporting(true);
     window.setTimeout(() => {
@@ -274,7 +449,7 @@ export const App: React.FC = () => {
         const cfg = latestConfigRef.current;
         const res = generateLampGeometry(cfg, {
           draft: false,
-          clipHeightMm: 15,
+          clipHeightMm: 16,
           validateManifold: true,
         });
         const stl = exportPartToBinarySTL(res.parts[0]);
@@ -345,7 +520,11 @@ export const App: React.FC = () => {
         return derived;
       });
       const label =
-        variant === 'table' ? 'Mesa (2 Piezas)' : variant === 'mini' ? 'Mini LED 001' : 'Colgante E26/E27';
+        variant === 'table'
+          ? 'Mesa (2 Piezas)'
+          : variant === 'mini'
+            ? 'Mini LED 001'
+            : 'Colgante E26/E27';
       showToast(`Variante de colección creada: ${label}`);
     },
     [dispatchGeometryBuild, showToast]
@@ -400,6 +579,7 @@ export const App: React.FC = () => {
         isNight={isNight}
         isBusy={isBusy}
         buildMode={config.silhouette.buildMode}
+        uiMode={uiMode}
         isTwoPartActive={isTwoPart}
         assemblyView={config.visual.assemblyView}
         onShuffle={handleShuffle}
@@ -419,6 +599,7 @@ export const App: React.FC = () => {
             },
           }))
         }
+        onChangeUiMode={setUiMode}
         onChangeBuildMode={(buildMode) =>
           handleChangeGeometry(
             (prev) => ({
@@ -438,6 +619,13 @@ export const App: React.FC = () => {
             visual: { ...prev.visual, assemblyView },
           }))
         }
+      />
+
+      <OzekCollectionPanel
+        activePieceId={activeOzekPieceId}
+        isNight={isNight}
+        onSelectPiece={handleSelectOzekPiece}
+        onApplyPaletteColor={handleApplyOzekColor}
       />
 
       <BottomTelemetry
@@ -481,15 +669,27 @@ export const App: React.FC = () => {
       <RightPanel
         config={config}
         defaultForFamily={defaultForFamily}
+        uiMode={uiMode}
         isExporting={isExporting}
         isNight={isNight}
+        sculptTool={sculptTool}
+        sculptRadiusMm={sculptRadiusMm}
+        sculptStrength={sculptStrength}
+        onChangeSculptTool={setSculptTool}
+        onChangeSculptRadius={setSculptRadiusMm}
+        onChangeSculptStrength={setSculptStrength}
+        onUndoSculpt={handleUndoSculpt}
+        onClearSculpt={handleClearSculpt}
         onChangeGeometry={handleChangeGeometry}
         onCommitGeometry={handleCommitGeometry}
         onChangeVisual={handleChangeVisual}
         onSelectFamily={handleSelectFamily}
+        onApplySizePreset={handleApplySizePreset}
         onExportFullSTL={handleExportFullSTL}
         onExportPartSTL={handleExportPartSTL}
         onExportTestBaseSTL={handleExportTestBaseSTL}
+        onExportAdapterSTL={handleExportAdapterSTL}
+        onExportZipPackage={handleExportZipPackage}
         onOpenCollections={() => setCollectionsOpen(true)}
         onQuickSaveJSON={handleQuickSaveJSON}
       />
@@ -525,7 +725,7 @@ export const App: React.FC = () => {
       />
 
       {toast && (
-        <div className="fixed bottom-16 left-4 z-30 px-4 py-2.5 rounded-2xl bg-zinc-950/90 text-white text-[12.5px] font-medium shadow-xl backdrop-blur-md border border-white/10">
+        <div className="fixed bottom-[72px] left-4 z-30 px-4 py-2.5 rounded-2xl bg-zinc-950/90 text-white text-[12.5px] font-medium shadow-xl backdrop-blur-md border border-white/10">
           {toast}
         </div>
       )}

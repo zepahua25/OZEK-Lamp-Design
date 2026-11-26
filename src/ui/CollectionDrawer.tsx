@@ -233,10 +233,10 @@ export const CollectionDrawer: React.FC<CollectionDrawerProps> = ({
             </button>
           </div>
 
-          {/* 4 Curated Presets */}
+          {/* 6 Curated v2.0 Gallery Templates */}
           <div className="space-y-2.5">
             <div className="text-[11.5px] font-semibold uppercase tracking-wider opacity-60">
-              Presets Curados de Colección ({CURATED_PRESETS.length} Diseños)
+              Galería Curada OZEK v2.0 ({CURATED_PRESETS.length} Plantillas)
             </div>
             <div className="space-y-2">
               {CURATED_PRESETS.map((preset) => (
@@ -252,10 +252,21 @@ export const CollectionDrawer: React.FC<CollectionDrawerProps> = ({
                     <FamilyThumbnail family={preset.config.family} />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5">
                       <span className="text-[12.5px] font-semibold truncate">
                         {preset.name}
                       </span>
+                      {preset.variantLabel && (
+                        <span
+                          className={`text-[9.5px] px-1.5 py-0.5 rounded-md font-medium shrink-0 ${
+                            isNight
+                              ? 'bg-zinc-700 text-amber-200'
+                              : 'bg-amber-100/80 text-amber-900'
+                          }`}
+                        >
+                          {preset.variantLabel}
+                        </span>
+                      )}
                     </div>
                     <p className={`text-[11px] line-clamp-1 ${muted}`}>
                       {preset.description}

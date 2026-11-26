@@ -3,10 +3,21 @@ export type LampFamilyId =
   | 'japanese_flute'
   | 'helical'
   | 'louvers'
+  | 'origami'
   | 'woven'
   | 'organic';
 
-export type SilhouetteType = 'curve' | 'stepped' | 'conical' | 'wavy';
+export type SilhouetteType = 'curve' | 'stepped' | 'conical' | 'wavy' | 'custom_spline';
+
+export type CrossSectionType =
+  | 'circle'
+  | 'superellipse'
+  | 'ellipse'
+  | 'polygon'
+  | 'concave_square'
+  | 'flower';
+
+export type SpiderStyleId = 'radial' | 'organic_ovals' | 'x_corners' | 'spiral';
 
 export type MountType = 'led_kit_001' | 'e26_e27';
 
@@ -22,7 +33,14 @@ export type CouplingType = 'gravity_seat' | 'spider' | 'thread' | 'bayonet' | 'f
 
 export type ViewAssemblyMode = 'assembled' | 'exploded' | 'shade_only' | 'base_only';
 
+export type UiMode = 'basic' | 'expert';
+
+export type LampSizePreset = 'S' | 'M' | 'L';
+
 export type MaterialPresetId =
+  | 'ozek_sand'
+  | 'ozek_onyx'
+  | 'ozek_copper'
   | 'pla_white'
   | 'amber_translucent'
   | 'smoked_amber'
@@ -32,6 +50,29 @@ export type MaterialPresetId =
   | 'stone_gray'
   | 'matte_black';
 
+export type ColorMode = 'solid' | 'stripes' | 'edges' | 'strands';
+
+export type SculptToolId = 'off' | 'push' | 'carve' | 'swirl' | 'smooth';
+
+export interface SculptStroke {
+  /** Normalized angular coordinate u in [0, 1) */
+  u: number;
+  /** Normalized height coordinate v in [0, 1] */
+  v: number;
+  /** Brush radius in mm (12 - 55 mm) */
+  radiusMm: number;
+  /** Brush intensity (0.1 - 1.0) */
+  strength: number;
+  tool: 'push' | 'carve' | 'swirl' | 'smooth';
+}
+
+export interface SplineControlPoint {
+  /** Normalized height along the shade [0..1] */
+  v: number;
+  /** Physical radius in mm [22..122] */
+  r: number;
+}
+
 export interface SilhouetteParams {
   type: SilhouetteType;
   /** Shade height (in two_part mode) or total lamp height (in monoblock mode), mm */
@@ -40,7 +81,25 @@ export interface SilhouetteParams {
   midRadius: number; // 35 - 122 mm
   topRadius: number; // 25 - 115 mm
   curvature: number; // 0.15 - 0.85
+  /** 5 draggable 2D spline control points (v in [0..1], r in mm) for visual silhouette editor */
+  controlPoints: SplineControlPoint[];
+  /** Cross-section profile type: circle, superellipse, ellipse, or soft polygon */
+  crossSectionType: CrossSectionType;
   superellipse: number; // 2.0 (circle) - 7.0 (rounded square)
+  /** Elliptical cross-section aspect ratio (0.60 - 1.00) */
+  ellipseAspect: number;
+  /** Polygonal cross-section side count (6 - 12 sides) */
+  polygonSides: number;
+  /** Polygonal corner rounding factor (0 = crisp bevel, 1 = very soft rounded polygon) */
+  polygonRounding: number;
+  /** Concave square inward curve depth (0.08 - 0.30, default 0.20) */
+  concaveDepth: number;
+  /** Flower / petal cross-section lobe count (6 - 10, default 8) */
+  flowerLobes: number;
+  /** Flower / petal depth amplitude (0.05 - 0.22, default 0.13) */
+  flowerDepth: number;
+  /** Progressive twist applied to cross-section along height (0 - 180 deg) */
+  sectionTwistDeg: number;
   stepHeightRatio: number; // 0.25 - 0.60
   wavyRings: number; // 2 - 6 stacked lobes
   wavyDepth: number; // 4 - 22 mm lobe depth
@@ -48,45 +107,43 @@ export interface SilhouetteParams {
   skirtWaveAmp: number;
   /** Number of skirt waves around the perimeter (3 - 8) */
   skirtWaveCount: number;
+  /** Optional smooth white translucent internal diffuser cylinder (1.0 mm wall) */
+  includeDiffuser: boolean;
+  /** Close top into a smooth full sphere/dome (R=0 mm for LED Kit 001, Ø16 mm discreet vent for E26/E27) */
+  closeTopDome: boolean;
   buildMode: BuildMode;
   splitRatio: number;
   fitClearance: number; // 0.15 - 0.50 mm
 }
 
 export interface BaseParams {
-  /** Independent architectural base style (used when buildMode === 'two_part') */
   style: BaseStyleId;
-  /** Surface finish on the base: smooth or finely ribbed (40 - 100 ribs) */
   finish: BaseFinish;
-  /** Number of fine vertical ribs on the base when finish === 'ribbed' (40 - 100) */
-  ribCount: number;
-  /** Coupling mechanism between Base and Shade */
+  ribCount: number; // 40 - 100
   coupling: CouplingType;
-  /** Base height in mm (40 - 90 mm standard, 16 - 120 mm full range) */
-  height: number;
-  /** Outer bottom foot radius of the base (45 - 80 mm => Ø90 - 160 mm) */
-  footRadius: number;
-  /** Coupling neck radius where the shade seats/locks onto the base, mm */
-  neckRadius: number;
-  /** Radial clearance between base and shade (default 0.4 mm for gravity_seat, 0.35 mm for thread/bayonet/spider) */
-  couplingClearance: number;
-  /** Coarse printable screw pitch in mm (used for coupling === 'thread') */
-  threadPitch: number;
-  /** Number of bayonet locking lugs (used for coupling === 'bayonet' or spider with bayonet) */
-  bayonetLugs: number;
-  /** Enable bayonet lock notches on the 4-spoke internal spider collar */
+  height: number; // 16 - 120 mm
+  footRadius: number; // 45 - 80 mm (Ø90 - 160 mm)
+  neckRadius: number; // 30 - 52 mm
+  couplingClearance: number; // 0.20 - 0.55 mm
+  threadPitch: number; // 3.5 - 5.0 mm
+  bayonetLugs: number; // 3 or 4
   spiderBayonet: boolean;
-  /** Spoked bottom ventilation flange on the shade */
+  /** Flat Z=0 spider bracket style (radial, organic_ovals, x_corners, spiral) */
+  spiderStyle: SpiderStyleId;
+  /** Number of arms/windows for spider bracket (3, 4, 5, or 6 depending on style) */
+  spiderArmCount: number;
+  /** Signature OZ☰K (☰) seal: 3 minimalist horizontal 0.8 mm grooves spaced 2.5 mm around base body */
+  signatureGrooves: boolean;
   shadeVentilation: boolean;
-  /** Slight vertical gap between cylinder top and shade (UMINO F017 floating collar look) */
-  collarRevealMm: number;
+  collarRevealMm: number; // 0 - 14 mm
 }
 
 export interface MountParams {
   type: MountType;
   position: MountPosition;
   wallThickness: number; // 1.6 - 3.2 mm
-  ledTolerance: number; // -0.5 to +0.5 mm (nominal 59.5 mm)
+  /** Nominal LED Kit 001 cavity = 59.5 + ledTolerance (default +0.2 mm => Ø59.7 mm for PLA) */
+  ledTolerance: number; // -0.5 to +0.5 mm
   e26Diameter: number; // 36 - 44 mm (default 40.5 mm)
   e26LipThickness: number; // 2.4 - 4.5 mm (default 3.5 mm)
   ventSlots: number; // 4 - 10 radial ventilation slots
@@ -101,13 +158,9 @@ export interface PleatedParams {
 }
 
 export interface JapaneseFluteParams {
-  /** Number of fine Japanese ceramic/washi flutes (40 - 100) */
-  count: number;
-  /** Subtle shallow flute relief depth (1.5 - 3.0 mm) */
-  depth: number;
-  /** Translucent wall thickness (0.8 - 2.4 mm) for warm light glow */
-  wallThickness: number;
-  /** Soft flute cross-section: 'soft_sine' (washi) or 'scallop' (ceramic flute) */
+  count: number; // 40 - 100
+  depth: number; // 1.5 - 3.0 mm
+  wallThickness: number; // 0.8 - 2.4 mm
   profile: 'soft_sine' | 'scallop';
 }
 
@@ -130,20 +183,56 @@ export interface LouversParams {
   waveAmplitude: number; // 0 - 1.0
 }
 
+export interface OrigamiParams {
+  /** Number of geometric diamond pleats around circumference (6 - 24) */
+  horizFacets: number;
+  /** Number of stacked origami diamond tiers vertically (3 - 12) */
+  vertTiers: number;
+  /** Diamond fold protrusion depth (3 - 14 mm) */
+  depth: number;
+  /** Subtle progressive helical twist (0 - 180 deg) */
+  twistDeg: number;
+  /** Crease edge smoothing for clean FDM printing without ringing (0 - 1) */
+  edgeSoftness: number;
+}
+
+export type WovenPattern = 'basket_1x1' | 'knitted' | 'ripple_mesh' | 'grid_mesh';
+
 export interface WovenParams {
-  horizFreq: number; // 16 - 72
-  vertFreq: number; // 24 - 90
-  relief: number; // 0.6 - 2.8 mm (added onto 0.8 mm valley)
-  pattern: 'basket_1x1' | 'twill' | 'double_2x2' | 'diamond';
+  horizFreq: number; // 16 - 72 (24 - 44 for RippleMesh / Grid)
+  vertFreq: number; // 18 - 90 (18 - 32 for RippleMesh / Grid)
+  relief: number; // 0.6 - 2.8 mm (Mimbre / Knitted)
+  /** Deep sculpted cell depth for RippleMesh & Grid (3.5 - 6.5 mm, valleys ~0.65 mm) */
+  rippleDepth: number;
+  pattern: WovenPattern;
   fdmSmoothing: number; // 0 - 1
 }
 
+export type OrganicMode = 'flames' | 'gravity';
+
 export interface OrganicParams {
-  mode: 'ribbons' | 'topo' | 'sculpt';
+  /** 'flames' = support-free sinuous flame/petal fins (<=45°); 'gravity' = Simplex 3D Marching-Squares ribbons */
+  mode: OrganicMode;
+  /** Number of sinuous flame fins (16 - 32) for 'flames' mode */
+  finCount: number;
+  /** Vertical petal wave cycles (2 - 6) for 'flames' mode */
+  flameWaves: number;
+  /** Extruded fin radial depth out from the 1.2 mm smooth core (8 - 22 mm) */
+  finDepth: number;
+  /** Extruded fin wall thickness (1.2 - 2.2 mm) */
+  finThickness: number;
+  /** Upward tip inclination (0 - 1) to reduce overhangs on horizontal gravity ribbons */
+  finLift: number;
+  /** Physical gravity acceleration (-9.8 to +9.8 m/s²: Up <-> None <-> Down) for Gravity ribbon sag/lift */
+  gravityAccel: number;
+  /** Spiral twist in degrees (0 - 180 deg) applied to Gravity ribbons */
+  gravityTwistDeg: number;
+  /** Laplacian smoothing passes (1 - 5) controlling ribbon stiffness vs softness */
+  smoothPasses: number;
   scale: number; // 1.0 - 4.5
   warp: number; // 0.0 - 1.6
-  bands: number; // 2 - 10
-  depth: number; // 2 - 14 mm
+  bands: number; // 3 - 7 isocurve levels for 'gravity' mode
+  depth: number; // legacy alias kept synchronized with finDepth
   overhangSmoothing: number; // 0 - 1
   seed: number; // 1 - 9999
 }
@@ -151,6 +240,14 @@ export interface OrganicParams {
 export interface VisualParams {
   material: MaterialPresetId;
   baseMaterial: MaterialPresetId;
+  /** AMS Multicolor preview mode */
+  colorMode: ColorMode;
+  accentMaterial: MaterialPresetId;
+  thirdMaterial: MaterialPresetId;
+  /** Horizontal stripe repeat count (1 - 8) when colorMode === 'stripes' */
+  stripeRepeats: number;
+  /** Edge/crest highlight threshold (1.0 - 4.0 mm) when colorMode === 'edges' */
+  edgeDepthMm: number;
   lightOn: boolean;
   lightIntensity: number; // 0.2 - 2.0
   lightWarmth: number; // 2200 - 4000 K
@@ -169,14 +266,17 @@ export interface LampConfig {
   japaneseFlute: JapaneseFluteParams;
   helical: HelicalParams;
   louvers: LouversParams;
+  origami: OrigamiParams;
   woven: WovenParams;
   organic: OrganicParams;
   visual: VisualParams;
+  /** Persistent interactive 3D sculpt brush strokes applied continuously on UV */
+  sculptStrokes: SculptStroke[];
 }
 
 export interface MeshPartData {
-  name: 'lamp' | 'base' | 'shade' | 'test_base';
-  role: 'shade' | 'base';
+  name: 'lamp' | 'base' | 'shade' | 'diffuser' | 'test_base' | 'adapter';
+  role: 'shade' | 'base' | 'diffuser';
   positions: Float32Array;
   normals: Float32Array;
   indices: Uint32Array;
@@ -197,6 +297,7 @@ export interface LampMetrics {
   gramsPLA: number;
   baseGramsPLA: number;
   shadeGramsPLA: number;
+  diffuserGramsPLA: number;
   overhangPercent: number;
   overhangAngle: number;
   totalTriangles: number;

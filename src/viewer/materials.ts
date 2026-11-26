@@ -19,6 +19,54 @@ export interface MaterialPresetSpec {
 }
 
 export const MATERIAL_PRESETS: Record<MaterialPresetId, MaterialPresetSpec> = {
+  ozek_sand: {
+    id: 'ozek_sand',
+    name: 'Arena Natural (OZ☰K)',
+    shortName: 'Arena',
+    swatchHex: '#F5F2EB',
+    swatchRingHex: '#D8D0C2',
+    color: '#F5F2EB',
+    roughness: 0.7,
+    metalness: 0.0,
+    clearcoat: 0.04,
+    clearcoatRoughness: 0.6,
+    translucency: 0.96,
+    absorption: 0.32,
+    glowTint: '#ffd088',
+    opacity: 1.0,
+  },
+  ozek_onyx: {
+    id: 'ozek_onyx',
+    name: 'Gris Ónice (OZ☰K)',
+    shortName: 'Ónice',
+    swatchHex: '#252525',
+    swatchRingHex: '#101010',
+    color: '#252525',
+    roughness: 0.6,
+    metalness: 0.04,
+    clearcoat: 0.14,
+    clearcoatRoughness: 0.45,
+    translucency: 0.16,
+    absorption: 0.68,
+    glowTint: '#ffaa4d',
+    opacity: 1.0,
+  },
+  ozek_copper: {
+    id: 'ozek_copper',
+    name: 'Cobre / Bronce (OZ☰K)',
+    shortName: 'Cobre',
+    swatchHex: '#C87D55',
+    swatchRingHex: '#8C4E2E',
+    color: '#C87D55',
+    roughness: 0.36,
+    metalness: 0.52,
+    clearcoat: 0.28,
+    clearcoatRoughness: 0.3,
+    translucency: 0.22,
+    absorption: 0.56,
+    glowTint: '#ff9648',
+    opacity: 1.0,
+  },
   pla_white: {
     id: 'pla_white',
     name: 'PLA Blanco Mate',
@@ -150,6 +198,9 @@ export const MATERIAL_PRESETS: Record<MaterialPresetId, MaterialPresetSpec> = {
 };
 
 export const MATERIAL_LIST: MaterialPresetSpec[] = [
+  MATERIAL_PRESETS.ozek_sand,
+  MATERIAL_PRESETS.ozek_onyx,
+  MATERIAL_PRESETS.ozek_copper,
   MATERIAL_PRESETS.pla_white,
   MATERIAL_PRESETS.amber_translucent,
   MATERIAL_PRESETS.smoked_amber,
@@ -168,6 +219,14 @@ export interface LampShaderUniforms {
   uAbsorption: { value: number };
   uGlowTint: { value: THREE.Color };
   uShowOverhangs: { value: number };
+  /** 0 = solid, 1 = AMS Z-stripes, 2 = edges/crests, 3 = alternating strands */
+  uColorMode: { value: number };
+  uAccentColor: { value: THREE.Color };
+  uThirdColor: { value: THREE.Color };
+  uStripeRepeats: { value: number };
+  uEdgeDepthMm: { value: number };
+  uShadeMinY: { value: number };
+  uShadeHeight: { value: number };
 }
 
 export function kelvinToColor(kelvin: number): THREE.Color {
@@ -195,6 +254,13 @@ export function createBacklitLampMaterial(
     uAbsorption: { value: spec.absorption },
     uGlowTint: { value: new THREE.Color(spec.glowTint) },
     uShowOverhangs: { value: 0.0 },
+    uColorMode: { value: 0.0 },
+    uAccentColor: { value: new THREE.Color('#C87D55') },
+    uThirdColor: { value: new THREE.Color('#252525') },
+    uStripeRepeats: { value: 2.0 },
+    uEdgeDepthMm: { value: 2.0 },
+    uShadeMinY: { value: 0.0 },
+    uShadeHeight: { value: 160.0 },
   };
 
   const material = new THREE.MeshPhysicalMaterial({
@@ -245,10 +311,46 @@ export function createBacklitLampMaterial(
         uniform float uAbsorption;
         uniform vec3 uGlowTint;
         uniform float uShowOverhangs;
+        uniform float uColorMode;
+        uniform vec3 uAccentColor;
+        uniform vec3 uThirdColor;
+        uniform float uStripeRepeats;
+        uniform float uEdgeDepthMm;
+        uniform float uShadeMinY;
+        uniform float uShadeHeight;
         varying float vThickness;
         varying float vOverhang;
         varying vec3 vWorldPos;
         varying vec3 vWorldNormal;`
+      )
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+        if (uColorMode > 0.5) {
+          float vNorm = clamp((vWorldPos.y - uShadeMinY) / max(uShadeHeight, 1.0), 0.0, 1.0);
+          if (uColorMode < 1.5) {
+            // Mode 1: AMS Z-Stripes (crisp horizontal height-band color swaps)
+            float band = mod(floor(vNorm * max(1.0, uStripeRepeats) * 3.0), 3.0);
+            if (band > 0.5 && band < 1.5) {
+              diffuseColor.rgb = uAccentColor;
+            } else if (band >= 1.5) {
+              diffuseColor.rgb = uThirdColor;
+            }
+          } else if (uColorMode < 2.5) {
+            // Mode 2: Edges / Crests (accent color highlights thicker crests & extruded fin tips)
+            float edgeMask = smoothstep(uEdgeDepthMm - 0.35, uEdgeDepthMm + 0.45, vThickness);
+            diffuseColor.rgb = mix(diffuseColor.rgb, uAccentColor, edgeMask);
+          } else {
+            // Mode 3: Strands / Alternating (3-color angular/helical strand mapping)
+            float ang = atan(-vWorldPos.z, vWorldPos.x);
+            float sector = mod(floor(((ang / 6.2831853) + 1.0 + vNorm * 0.35) * 12.0), 3.0);
+            if (sector > 0.5 && sector < 1.5) {
+              diffuseColor.rgb = uAccentColor;
+            } else if (sector >= 1.5) {
+              diffuseColor.rgb = uThirdColor;
+            }
+          }
+        }`
       )
       .replace(
         '#include <emissivemap_fragment>',
@@ -258,18 +360,25 @@ export function createBacklitLampMaterial(
         vec3 bulbDir = toBulb / max(distMm, 0.001);
 
         // Exponential Beer-Lambert attenuation through real local wall thickness (mm)
-        // Thin 0.8 mm woven valleys glow noticeably warmer than 2.2 mm crests!
-        float thickAtten = exp(-max(vThickness, 0.7) * (uAbsorption * 1.35));
-        float valleyBoost = smoothstep(1.6, 0.85, vThickness) * 0.45;
+        // Thin 0.65 mm RippleMesh/Grid cell windows & 1.2 mm Organic diffuser cores glow brilliantly warm,
+        // while thick 3.5–6.5 mm arches & extruded fins stay crisp & sculpted!
+        float thickAtten = exp(-max(vThickness, 0.6) * (uAbsorption * 1.42));
+        float thinWindowBoost = pow(smoothstep(1.65, 0.62, vThickness), 1.45) * 1.38;
+        float coreBoost = smoothstep(2.1, 1.05, vThickness) * 0.35;
         // Smooth radial distance falloff calibrated in millimeters
-        float distAtten = 1.0 / (1.0 + 0.00018 * distMm * distMm);
+        float distAtten = 1.0 / (1.0 + 0.00016 * distMm * distMm);
 
         vec3 wn = normalize(vWorldNormal);
         float backFacing = clamp(dot(-wn, bulbDir) * 0.55 + 0.45, 0.0, 1.0);
         float innerLit = clamp(dot(wn, bulbDir), 0.0, 1.0);
 
-        float glowPower = ((thickAtten * uTranslucency + valleyBoost) * backFacing + innerLit * 0.58) * distAtten * uBulbIntensity;
-        vec3 warmGlow = uBulbColor * uGlowTint * glowPower * 1.48;
+        float glowPower =
+          ((thickAtten * uTranslucency + coreBoost) * backFacing +
+            thinWindowBoost * (0.55 + 0.45 * backFacing) +
+            innerLit * 0.58) *
+          distAtten *
+          uBulbIntensity;
+        vec3 warmGlow = uBulbColor * mix(uGlowTint, vec3(1.0, 0.86, 0.56), thinWindowBoost * 0.55) * glowPower * 1.55;
         totalEmissiveRadiance += warmGlow;`
       )
       .replace(
@@ -283,7 +392,7 @@ export function createBacklitLampMaterial(
       );
   };
 
-  material.customProgramCacheKey = () => 'ozek-backlit-lamp-v2';
+  material.customProgramCacheKey = () => 'ozek-backlit-lamp-v3-ams';
 
   return { material, uniforms };
 }

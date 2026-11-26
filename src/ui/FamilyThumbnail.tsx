@@ -26,9 +26,6 @@ export const FamilyThumbnail: React.FC<FamilyThumbnailProps> = ({ family }) => {
         {[17, 22, 27, 32, 37, 42, 47].map((x) => (
           <line key={x} x1={x} y1="14" x2={x} y2="39" stroke="#f6c39c" strokeOpacity="0.45" strokeWidth="1.6" />
         ))}
-        {[24, 28, 32, 36, 40].map((x) => (
-          <line key={x} x1={x} y1="40" x2={x} y2="53" stroke="#f6c39c" strokeOpacity="0.35" strokeWidth="1.2" />
-        ))}
       </svg>
     );
   }
@@ -48,21 +45,19 @@ export const FamilyThumbnail: React.FC<FamilyThumbnailProps> = ({ family }) => {
           </radialGradient>
         </defs>
         <rect width="64" height="64" rx="10" fill="url(#jp-bg)" />
-        {/* Ribbed terracotta dome base */}
         <path d="M18 54 C18 43, 24 38, 32 38 C40 38, 46 43, 46 54 Z" fill="#b45a36" />
-        {/* Fine fluted Japanese conical shade with organic wavy hem */}
         <path
           d="M24 12 L40 12 L53 38 Q48 42 43 38 Q37 42 32 38 Q27 42 21 38 Q16 42 11 38 Z"
           fill="url(#jp-shade)"
           stroke="#c8b392"
           strokeWidth="0.9"
         />
-        {[26, 28, 30, 32, 34, 36, 38].map((x, idx) => (
+        {[26, 29, 32, 35, 38].map((x, idx) => (
           <line
             key={x}
             x1={x}
             y1="13"
-            x2={16 + idx * 5.2}
+            x2={18 + idx * 7}
             y2="37"
             stroke="#c4ab87"
             strokeOpacity="0.55"
@@ -90,7 +85,7 @@ export const FamilyThumbnail: React.FC<FamilyThumbnailProps> = ({ family }) => {
         <rect width="64" height="64" rx="10" fill="url(#he-bg)" />
         <path d="M25 39 L39 39 L42 56 L22 56 Z" fill="#27272a" />
         <rect x="14" y="11" width="36" height="28" rx="3" fill="url(#he-glow)" />
-        {[-8, -2, 4, 10, 16, 22, 28, 34, 40].map((o) => (
+        {[-6, 0, 6, 12, 18, 24, 30, 36].map((o) => (
           <line
             key={o}
             x1={14 + o}
@@ -102,7 +97,6 @@ export const FamilyThumbnail: React.FC<FamilyThumbnailProps> = ({ family }) => {
             strokeWidth="2.1"
           />
         ))}
-        <rect x="14" y="11" width="36" height="28" rx="3" fill="none" stroke="#85380a" strokeOpacity="0.3" />
       </svg>
     );
   }
@@ -133,7 +127,30 @@ export const FamilyThumbnail: React.FC<FamilyThumbnailProps> = ({ family }) => {
             strokeLinecap="round"
           />
         ))}
-        <rect x="15" y="11" width="34" height="42" rx="5" fill="none" stroke="#52525b" strokeWidth="1.2" />
+      </svg>
+    );
+  }
+
+  if (family === 'origami') {
+    return (
+      <svg viewBox="0 0 64 64" className="w-full h-full">
+        <defs>
+          <linearGradient id="og-bg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#eef2f6" />
+            <stop offset="100%" stopColor="#dce2e9" />
+          </linearGradient>
+          <linearGradient id="og-lit" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#ffffff" />
+            <stop offset="100%" stopColor="#e8dcc8" />
+          </linearGradient>
+        </defs>
+        <rect width="64" height="64" rx="10" fill="url(#og-bg)" />
+        <rect x="22" y="42" width="20" height="12" rx="2" fill="#9ca3af" />
+        {/* Faceted Yoshimura origami diamonds */}
+        <polygon points="32,10 47,20 32,30 17,20" fill="url(#og-lit)" stroke="#b4a795" strokeWidth="1" />
+        <polygon points="17,20 32,30 18,42 12,30" fill="#e5d7be" stroke="#b4a795" strokeWidth="1" />
+        <polygon points="47,20 52,30 46,42 32,30" fill="#d9c6a6" stroke="#b4a795" strokeWidth="1" />
+        <polygon points="32,30 46,42 32,44 18,42" fill="#fff7e6" stroke="#b4a795" strokeWidth="1" />
       </svg>
     );
   }
@@ -185,7 +202,6 @@ export const FamilyThumbnail: React.FC<FamilyThumbnailProps> = ({ family }) => {
       <circle cx="32" cy="32" r="21" fill="url(#or-sphere)" />
       <path d="M15 26 C22 18, 34 38, 48 22" fill="none" stroke="#fff9e2" strokeOpacity="0.72" strokeWidth="2.2" />
       <path d="M13 36 C25 26, 36 46, 51 33" fill="none" stroke="#8f4c16" strokeOpacity="0.45" strokeWidth="1.8" />
-      <path d="M19 45 C28 38, 39 50, 47 41" fill="none" stroke="#fff9e2" strokeOpacity="0.55" strokeWidth="1.8" />
     </svg>
   );
 };

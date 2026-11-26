@@ -1,4 +1,14 @@
 import { LampConfig, LampFamilyId } from '../types/lamp';
+import type { SolidMeshBuilder } from './baseBuilder';
+
+export interface ExtraGeometryContext {
+  mb: SolidMeshBuilder;
+  config: LampConfig;
+  seatY: number;
+  shadeHeight: number;
+  draft: boolean;
+  invertedForPendant: boolean;
+}
 
 export interface DisplacementContext {
   /** Normalized angle u in [0, 1) */
@@ -45,6 +55,8 @@ export interface LampFamilyDefinition {
   };
   /** Creates a stateful evaluator (e.g. pre-seeded simplex noise) for one mesh build */
   createEvaluator(config: LampConfig): (ctx: DisplacementContext) => DisplacementResult;
+  /** Optional post-pass to append watertight sculpted fins/ribbons anchored into the smooth diffuser core */
+  appendExtraGeometry?(ctx: ExtraGeometryContext): void;
   /** Whether bottom spoked ventilation is requested for this family */
   wantsBottomVentilation?(config: LampConfig): boolean;
 }

@@ -1,17 +1,18 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { LampConfig, MeshPartData } from '../types/lamp';
-import { getShadeSeatY } from '../geometry/coupling';
+import { LampConfig, MeshPartData, SculptStroke, SculptToolId } from '../types/lamp';
+import { getCouplingHeightMm, getShadeSeatY } from '../geometry/coupling';
 import {
   LampShaderUniforms,
+  MATERIAL_PRESETS,
   applyMaterialPreset,
   createBacklitLampMaterial,
   kelvinToColor,
 } from './materials';
 
 interface ScenePartEntry {
-  role: 'shade' | 'base';
+  role: 'shade' | 'base' | 'diffuser';
   mesh: THREE.Mesh;
   material: THREE.MeshPhysicalMaterial;
   uniforms: LampShaderUniforms;
@@ -46,6 +47,17 @@ export class LampScene {
   private disposed = false;
   private lastConfig: LampConfig | null = null;
   private resizeObserver: ResizeObserver;
+
+  // Interactive 3D Sculpt Brush (e-leora inspired non-destructive UV brush)
+  private readonly raycaster = new THREE.Raycaster();
+  private readonly brushRingMesh: THREE.Mesh;
+  private sculptTool: SculptToolId = 'off';
+  private sculptRadiusMm = 28;
+  private sculptStrength = 0.55;
+  private isSculptDragging = false;
+  private lastStrokeAtMs = 0;
+  private onSculptStrokeCb: ((stroke: SculptStroke) => void) | null = null;
+  private onSculptEndCb: (() => void) | null = null;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -85,7 +97,7 @@ export class LampScene {
     this.controls.dampingFactor = 0.07;
     this.controls.minDistance = 95;
     this.controls.maxDistance = 1200;
-    this.controls.maxPolarAngle = Math.PI * 0.72; // Allow orbiting slightly underneath to inspect threads & vents!
+    this.controls.maxPolarAngle = Math.PI * 0.72;
     this.controls.target.set(52, 126, 0);
     this.controls.update();
 
@@ -116,7 +128,6 @@ export class LampScene {
     this.internalLight.castShadow = false;
     this.scene.add(this.internalLight);
 
-    // Sculpted frosted LED bulb globe sitting atop the socket (visible in exploded view!)
     const bulbGeo = new THREE.SphereGeometry(20, 28, 20);
     bulbGeo.scale(1, 1.18, 1);
     const bulbMat = new THREE.MeshBasicMaterial({ color: '#ffebd0' });
@@ -134,6 +145,24 @@ export class LampScene {
     this.floorMesh.receiveShadow = true;
     this.floorMesh.position.y = -0.2;
     this.scene.add(this.floorMesh);
+
+    // Floating 3D sculpt brush cursor ring on the lamp surface
+    const ringGeo = new THREE.RingGeometry(0.84, 1.0, 40);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: '#f59e0b',
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.85,
+      depthTest: false,
+    });
+    this.brushRingMesh = new THREE.Mesh(ringGeo, ringMat);
+    this.brushRingMesh.visible = false;
+    this.brushRingMesh.renderOrder = 20;
+    this.scene.add(this.brushRingMesh);
+
+    this.renderer.domElement.addEventListener('pointerdown', this.handlePointerDown);
+    this.renderer.domElement.addEventListener('pointermove', this.handlePointerMove);
+    window.addEventListener('pointerup', this.handlePointerUp);
 
     const glowTex = this.createRadialGlowTexture();
     const glowGeo = new THREE.PlaneGeometry(380, 380);
@@ -224,8 +253,7 @@ export class LampScene {
   public updateMeshes(partDataList: MeshPartData[], config: LampConfig): void {
     this.lastConfig = config;
 
-    // Remember current animated Y offsets per role so slider tweaks don't jump during exploded view!
-    const prevOffsets = new Map<'shade' | 'base', number>();
+    const prevOffsets = new Map<'shade' | 'base' | 'diffuser', number>();
     for (const entry of this.parts) {
       prevOffsets.set(entry.role, entry.mesh.position.y);
       this.lampGroup.remove(entry.mesh);
@@ -246,16 +274,18 @@ export class LampScene {
       geom.computeBoundingSphere();
 
       const presetId =
-        part.role === 'base' && config.silhouette.buildMode === 'two_part'
-          ? config.visual.baseMaterial
-          : config.visual.material;
+        part.role === 'diffuser'
+          ? 'pla_white'
+          : part.role === 'base' && config.silhouette.buildMode === 'two_part'
+            ? config.visual.baseMaterial
+            : config.visual.material;
 
       const { material, uniforms } = createBacklitLampMaterial(presetId, activeClip);
       if (this.sectionCutEnabled) {
         material.side = THREE.DoubleSide;
       }
       const mesh = new THREE.Mesh(geom, material);
-      mesh.castShadow = true;
+      mesh.castShadow = part.role !== 'diffuser';
       mesh.receiveShadow = true;
       mesh.position.y = prevOffsets.get(part.role) ?? 0;
 
@@ -295,46 +325,72 @@ export class LampScene {
       this.scene.environmentIntensity = 0.45;
     }
 
-    // Physical bulb position: right above the socket (especially realistic on Conkel E27, Pedestal, Cylinder, Tripod!)
     const isPendant = mount.position === 'top';
+    const couplingH = getCouplingHeightMm(base);
     let bulbY: number;
+    let lightY: number;
     if (isPendant) {
       bulbY = silhouette.height * 0.56;
+      lightY = bulbY;
     } else if (isTwoPart) {
-      if (base.style === 'conkel' && mount.type === 'e26_e27') {
+      if (mount.type === 'led_kit_001') {
+        // LED Kit 001 puck sits in the open-top upper cup flush with the top of the base collar!
+        const ledCupTopY =
+          base.style === 'conkel'
+            ? Math.max(seatY, 14.5) + couplingH
+            : seatY + couplingH;
+        bulbY = ledCupTopY - 3.0;
+        // Point light radiates upward from just above the LED puck into the shade cavity
+        lightY = ledCupTopY + Math.min(silhouette.height * 0.34, 34);
+      } else if (base.style === 'conkel') {
         bulbY = base.height + 28;
+        lightY = bulbY;
       } else {
         bulbY = seatY + Math.min(silhouette.height * 0.46, 52);
+        lightY = bulbY;
       }
     } else {
       bulbY =
         mount.type === 'led_kit_001'
           ? Math.min(silhouette.height * 0.45, Math.max(36, silhouette.height * 0.34))
           : silhouette.height * 0.48;
+      lightY = bulbY;
     }
 
     const assembly = visual.assemblyView;
+    const hasDiffuser = isTwoPart && silhouette.includeDiffuser;
+    // Stepped exploded view: Base (0 mm) -> Diffuser (+34 mm) -> Outer Shade (+82 mm, or +50 mm without diffuser)
     const shadeExplodeY =
       isTwoPart && assembly === 'exploded'
-        ? 50
+        ? hasDiffuser
+          ? 82
+          : 50
+        : isTwoPart && assembly === 'shade_only'
+          ? -seatY
+          : 0;
+    const diffuserExplodeY =
+      isTwoPart && assembly === 'exploded'
+        ? 34
         : isTwoPart && assembly === 'shade_only'
           ? -seatY
           : 0;
 
-    // Position bulb visually inside shade (or sitting on the base in exploded/base_only view!)
     const bulbVisualY =
       isTwoPart && assembly === 'shade_only' ? silhouette.height * 0.45 : bulbY;
+    const lightVisualY =
+      isTwoPart && assembly === 'shade_only' ? silhouette.height * 0.45 : lightY;
     const bulbPos = new THREE.Vector3(0, bulbVisualY, 0);
+    const lightPos = new THREE.Vector3(0, lightVisualY, 0);
     const bulbColor = kelvinToColor(visual.lightWarmth);
     const effIntensity = visual.lightOn ? visual.lightIntensity : 0;
 
-    this.internalLight.position.copy(bulbPos);
+    this.internalLight.position.copy(lightPos);
     this.internalLight.color.copy(bulbColor);
     this.internalLight.intensity = effIntensity * (isNight ? 28000 : 18500);
 
-    // Scale bulb core nicely (compact puck for LED Kit 001, A19 globe for E26/E27)
     if (mount.type === 'led_kit_001') {
-      this.bulbCoreMesh.scale.set(0.95, 0.28, 0.95);
+      // Realistic Ø58 mm x ~7.5 mm glowing LED puck seated in the top cup of the base
+      this.bulbCoreMesh.scale.set(1.42, 0.16, 1.42);
     } else {
       this.bulbCoreMesh.scale.set(1.0, 1.15, 1.0);
     }
@@ -353,19 +409,53 @@ export class LampScene {
       this.cordGroup.position.y = silhouette.height;
     }
 
+    const colorModeNum =
+      visual.colorMode === 'stripes'
+        ? 1.0
+        : visual.colorMode === 'edges'
+          ? 2.0
+          : visual.colorMode === 'strands'
+            ? 3.0
+            : 0.0;
+    const accentHex =
+      (MATERIAL_PRESETS[visual.accentMaterial] ?? MATERIAL_PRESETS.ozek_copper).color;
+    const thirdHex =
+      (MATERIAL_PRESETS[visual.thirdMaterial] ?? MATERIAL_PRESETS.ozek_onyx).color;
+
     for (const entry of this.parts) {
       const presetId =
-        entry.role === 'base' && isTwoPart ? visual.baseMaterial : visual.material;
+        entry.role === 'diffuser'
+          ? 'ozek_sand'
+          : entry.role === 'base' && isTwoPart
+            ? visual.baseMaterial
+            : visual.material;
       applyMaterialPreset(entry.material, entry.uniforms, presetId);
-      entry.uniforms.uBulbPos.value.copy(bulbPos);
+      entry.uniforms.uBulbPos.value.copy(lightPos);
       entry.uniforms.uBulbColor.value.copy(bulbColor);
-      entry.uniforms.uBulbIntensity.value = effIntensity;
+      entry.uniforms.uBulbIntensity.value =
+        entry.role === 'diffuser' ? effIntensity * 1.25 : effIntensity;
       entry.uniforms.uShowOverhangs.value = visual.showOverhangs ? 1.0 : 0.0;
+
+      // Apply AMS multicolor preview uniforms strictly to the outer shade
+      if (entry.role === 'shade') {
+        entry.uniforms.uColorMode.value = colorModeNum;
+        entry.uniforms.uAccentColor.value.set(accentHex);
+        entry.uniforms.uThirdColor.value.set(thirdHex);
+        entry.uniforms.uStripeRepeats.value = visual.stripeRepeats || 2;
+        entry.uniforms.uEdgeDepthMm.value = visual.edgeDepthMm || 2.0;
+        entry.uniforms.uShadeMinY.value = isTwoPart ? seatY + shadeExplodeY : 0;
+        entry.uniforms.uShadeHeight.value = silhouette.height;
+      } else {
+        entry.uniforms.uColorMode.value = 0.0;
+      }
 
       if (isTwoPart) {
         if (entry.role === 'base') {
           entry.mesh.visible = assembly !== 'shade_only';
           entry.targetOffsetY = 0;
+        } else if (entry.role === 'diffuser') {
+          entry.mesh.visible = assembly !== 'base_only';
+          entry.targetOffsetY = diffuserExplodeY;
         } else {
           entry.mesh.visible = assembly !== 'base_only';
           entry.targetOffsetY = shadeExplodeY;
@@ -406,7 +496,7 @@ export class LampScene {
   public resetCamera(): void {
     const cfg = this.lastConfig;
     const isTwoPart = cfg?.silhouette.buildMode === 'two_part' && cfg.mount.position === 'bottom';
-    const explodeExtra = isTwoPart && cfg?.visual.assemblyView === 'exploded' ? 55 : 0;
+    const explodeExtra = isTwoPart && cfg?.visual.assemblyView === 'exploded' ? 58 : 0;
     const totalH = cfg
       ? (isTwoPart ? getShadeSeatY(cfg) + cfg.silhouette.height : cfg.silhouette.height) +
         explodeExtra
@@ -419,7 +509,6 @@ export class LampScene {
   private animate = (): void => {
     if (this.disposed) return;
     this.rafId = requestAnimationFrame(this.animate);
-    // Smooth spring-lerp exploded view offset!
     for (const entry of this.parts) {
       const diff = entry.targetOffsetY - entry.mesh.position.y;
       if (Math.abs(diff) > 0.08) {
@@ -432,9 +521,113 @@ export class LampScene {
     this.renderer.render(this.scene, this.camera);
   };
 
+  public setSculptBrush(
+    tool: SculptToolId,
+    radiusMm: number,
+    strength: number,
+    onStroke: (stroke: SculptStroke) => void,
+    onStrokeEnd: () => void
+  ): void {
+    this.sculptTool = tool;
+    this.sculptRadiusMm = radiusMm;
+    this.sculptStrength = strength;
+    this.onSculptStrokeCb = onStroke;
+    this.onSculptEndCb = onStrokeEnd;
+    if (tool === 'off') {
+      this.brushRingMesh.visible = false;
+      this.isSculptDragging = false;
+      this.controls.enabled = true;
+      this.renderer.domElement.style.cursor = 'grab';
+    } else {
+      this.renderer.domElement.style.cursor = 'crosshair';
+    }
+  }
+
+  private raycastShade(clientX: number, clientY: number): THREE.Intersection | null {
+    const shadeEntry = this.parts.find((p) => p.role === 'shade' && p.mesh.visible);
+    if (!shadeEntry) return null;
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(
+      ((clientX - rect.left) / Math.max(rect.width, 1)) * 2 - 1,
+      -((clientY - rect.top) / Math.max(rect.height, 1)) * 2 + 1
+    );
+    this.raycaster.setFromCamera(ndc, this.camera);
+    const hits = this.raycaster.intersectObject(shadeEntry.mesh, false);
+    return hits.length > 0 ? hits[0] : null;
+  }
+
+  private emitStrokeFromHit(hit: THREE.Intersection): void {
+    if (this.sculptTool === 'off' || !this.onSculptStrokeCb || !this.lastConfig) return;
+    const cfg = this.lastConfig;
+    const isTwoPart = cfg.silhouette.buildMode === 'two_part' && cfg.mount.position === 'bottom';
+    const shadeEntry = this.parts.find((p) => p.role === 'shade');
+    const offsetY = shadeEntry ? shadeEntry.mesh.position.y : 0;
+    const baseY = isTwoPart ? getShadeSeatY(cfg) + offsetY : offsetY;
+
+    const p = hit.point;
+    const theta = Math.atan2(-p.z, p.x);
+    const u = ((theta / (2 * Math.PI)) % 1 + 1) % 1;
+    const vRaw = (p.y - baseY) / Math.max(cfg.silhouette.height, 1);
+    const v = Math.max(0.06, Math.min(0.94, vRaw));
+
+    this.onSculptStrokeCb({
+      u,
+      v,
+      radiusMm: this.sculptRadiusMm,
+      strength: this.sculptStrength,
+      tool: this.sculptTool,
+    });
+  }
+
+  private updateBrushRing(hit: THREE.Intersection | null): void {
+    if (!hit || this.sculptTool === 'off') {
+      this.brushRingMesh.visible = false;
+      return;
+    }
+    this.brushRingMesh.visible = true;
+    const n = hit.face ? hit.face.normal.clone().normalize() : new THREE.Vector3(0, 1, 0);
+    this.brushRingMesh.position.copy(hit.point).addScaledVector(n, 1.5);
+    this.brushRingMesh.lookAt(hit.point.clone().add(n));
+    const scale = Math.max(8, this.sculptRadiusMm * 0.72);
+    this.brushRingMesh.scale.set(scale, scale, 1);
+  }
+
+  private handlePointerDown = (e: PointerEvent): void => {
+    if (this.sculptTool === 'off' || e.button !== 0) return;
+    const hit = this.raycastShade(e.clientX, e.clientY);
+    if (!hit) return;
+    this.isSculptDragging = true;
+    this.controls.enabled = false;
+    this.lastStrokeAtMs = performance.now();
+    this.updateBrushRing(hit);
+    this.emitStrokeFromHit(hit);
+  };
+
+  private handlePointerMove = (e: PointerEvent): void => {
+    if (this.sculptTool === 'off') return;
+    const hit = this.raycastShade(e.clientX, e.clientY);
+    this.updateBrushRing(hit);
+    if (!this.isSculptDragging || !hit) return;
+    const now = performance.now();
+    if (now - this.lastStrokeAtMs >= 85) {
+      this.lastStrokeAtMs = now;
+      this.emitStrokeFromHit(hit);
+    }
+  };
+
+  private handlePointerUp = (): void => {
+    if (!this.isSculptDragging) return;
+    this.isSculptDragging = false;
+    this.controls.enabled = true;
+    this.onSculptEndCb?.();
+  };
+
   public dispose(): void {
     this.disposed = true;
     cancelAnimationFrame(this.rafId);
+    this.renderer.domElement.removeEventListener('pointerdown', this.handlePointerDown);
+    this.renderer.domElement.removeEventListener('pointermove', this.handlePointerMove);
+    window.removeEventListener('pointerup', this.handlePointerUp);
     this.resizeObserver.disconnect();
     this.controls.dispose();
     for (const entry of this.parts) {

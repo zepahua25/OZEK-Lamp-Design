@@ -44,7 +44,7 @@ export const ViewportTools: React.FC<ViewportToolsProps> = ({
   const overhangActive = 'bg-rose-600 border-rose-600 text-white shadow-rose-500/30';
 
   return (
-    <div className="fixed top-4 right-[380px] z-20 hidden sm:flex flex-col gap-2">
+    <div className="fixed top-4 right-[388px] z-20 hidden sm:flex flex-col gap-2">
       <button
         type="button"
         onClick={onZoomIn}

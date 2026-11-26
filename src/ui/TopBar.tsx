@@ -1,17 +1,19 @@
 import React from 'react';
-import { Layers, Lightbulb, Moon, Shuffle, Sun } from 'lucide-react';
-import { BuildMode, ViewAssemblyMode } from '../types/lamp';
+import { Layers, Lightbulb, Moon, Shuffle, SlidersHorizontal, Sun } from 'lucide-react';
+import { BuildMode, UiMode, ViewAssemblyMode } from '../types/lamp';
 
 interface TopBarProps {
   lightOn: boolean;
   isNight: boolean;
   isBusy: boolean;
   buildMode: BuildMode;
+  uiMode: UiMode;
   isTwoPartActive: boolean;
   assemblyView: ViewAssemblyMode;
   onShuffle: () => void;
   onToggleLight: () => void;
   onToggleTheme: () => void;
+  onChangeUiMode: (mode: UiMode) => void;
   onChangeBuildMode: (mode: BuildMode) => void;
   onChangeAssemblyView: (mode: ViewAssemblyMode) => void;
 }
@@ -21,11 +23,13 @@ export const TopBar: React.FC<TopBarProps> = ({
   isNight,
   isBusy,
   buildMode,
+  uiMode,
   isTwoPartActive,
   assemblyView,
   onShuffle,
   onToggleLight,
   onToggleTheme,
+  onChangeUiMode,
   onChangeBuildMode,
   onChangeAssemblyView,
 }) => {
@@ -64,11 +68,39 @@ export const TopBar: React.FC<TopBarProps> = ({
       >
         <span className="w-2 h-2 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.75)]" />
         <span className="text-[11.5px] font-semibold tracking-[0.09em] uppercase">
-          OZEK Studio
+          OZEK v2.0
         </span>
       </div>
 
-      {/* Mode selector: 1 Pieza vs 2 Piezas (Base + Pantalla) */}
+      {/* Mode selector: Básico vs Experto */}
+      <div
+        className={`pointer-events-auto flex items-center gap-0.5 p-1 rounded-full border backdrop-blur-md shadow-sm ${groupPill}`}
+        title="Básico muestra controles esenciales; Experto despliega tolerancias en mm y parámetros avanzados"
+      >
+        <SlidersHorizontal
+          className={`w-3.5 h-3.5 ml-1.5 mr-0.5 ${isNight ? 'text-amber-400' : 'text-zinc-500'}`}
+        />
+        <button
+          type="button"
+          onClick={() => onChangeUiMode('basic')}
+          className={`px-2.5 py-1 rounded-full text-[11.5px] font-medium transition-all ${
+            uiMode === 'basic' ? activeChip : idleChip
+          }`}
+        >
+          Básico
+        </button>
+        <button
+          type="button"
+          onClick={() => onChangeUiMode('expert')}
+          className={`px-2.5 py-1 rounded-full text-[11.5px] font-medium transition-all ${
+            uiMode === 'expert' ? activeChip : idleChip
+          }`}
+        >
+          Experto
+        </button>
+      </div>
+
+      {/* Construction Mode: 1 Pieza vs 2 Piezas */}
       <div
         className={`pointer-events-auto flex items-center gap-0.5 p-1 rounded-full border backdrop-blur-md shadow-sm ${groupPill}`}
         title="Modo de construcción: 1 Pieza unificada o 2 Piezas separadas (Base + Pantalla)"
@@ -93,11 +125,11 @@ export const TopBar: React.FC<TopBarProps> = ({
         </button>
       </div>
 
-      {/* Two-Part Assembly Inspector (Armada / Vista Explotada +50mm / Base / Pantalla) */}
+      {/* Two-Part Assembly Inspector */}
       {isTwoPartActive && (
         <div
           className={`pointer-events-auto flex items-center gap-0.5 p-1 rounded-full border backdrop-blur-md shadow-sm ${groupPill}`}
-          title="Inspecciona el encaje Base–Pantalla (Vista Explotada levanta 50 mm)"
+          title="Inspecciona el encaje Base–Pantalla (y Difusor Interno en Vista Explotada)"
         >
           <Layers
             className={`w-3.5 h-3.5 ml-1.5 mr-0.5 ${isNight ? 'text-amber-400' : 'text-zinc-500'}`}

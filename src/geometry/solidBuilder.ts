@@ -11,7 +11,12 @@ import {
   getShadeSeatY,
 } from './coupling';
 import { getLampFamily } from './registry';
-import { evaluateSilhouetteRadius, superellipseMultiplier } from './silhouette';
+import {
+  evaluateCrossSectionMultiplier,
+  evaluateEffectiveSilhouetteRadius,
+  evaluateSculptField,
+  evaluateSilhouetteRadius,
+} from './silhouette';
 import { getLedKit001Dimensions } from './mounts/ledKit001';
 import { getSocketE26Dimensions } from './mounts/socketE26';
 
@@ -54,8 +59,9 @@ function buildAngularLayout(
   let usbSlotSegs = 0;
 
   if (usbHalfAngle !== null && usbHalfAngle > 0) {
-    usbSlotSegs = Math.max(2, Math.round((2 * usbHalfAngle) / ((2 * Math.PI) / N)));
-    if (usbSlotSegs > Math.floor(N / 6)) usbSlotSegs = Math.floor(N / 6);
+    usbSlotSegs = Math.max(4, Math.round((2 * usbHalfAngle) / ((2 * Math.PI) / N)));
+    if ((usbSlotSegs & 1) === 1) usbSlotSegs += 1;
+    if (usbSlotSegs > Math.floor(N / 6)) usbSlotSegs = Math.max(4, Math.floor(N / 6) & ~1);
     const restSegs = N - usbSlotSegs;
     for (let u = 0; u <= usbSlotSegs; u++) {
       thetas[u] = -usbHalfAngle + (2 * usbHalfAngle * u) / usbSlotSegs;
@@ -134,10 +140,18 @@ function createWallEvaluator(
     ) {
       const vLocal = clamp(yLocal / Math.max(totalHeight, 1), 0, 1);
       const vDesign = invertedForPendant ? 1 - vLocal : vLocal;
+      const isClosedDome = Boolean(silhouette.closeTopDome) && !invertedForPendant;
+      const isClosedPole = isClosedDome && mount.type === 'led_kit_001';
+      const nominalCoreWall = config.family === 'organic' ? 1.2 : wallT;
 
-      let baseR = evaluateSilhouetteRadius(vDesign, silhouette);
+      let baseR = evaluateEffectiveSilhouetteRadius(
+        vDesign,
+        silhouette,
+        mount.type,
+        nominalCoreWall,
+        invertedForPendant
+      );
 
-      // Smoothly extrapolate conical flare if yLocal < 0 (hanging wavy skirt below spider ring!)
       if (yLocal < 0) {
         const r0 = evaluateSilhouetteRadius(0, silhouette);
         const r1 = evaluateSilhouetteRadius(0.05, silhouette);
@@ -149,8 +163,31 @@ function createWallEvaluator(
         baseR < minInnerR + wallT + 8
           ? smoothstep(mountFlatBandMm, mountFlatBandMm + 14, Math.max(0, yLocal))
           : 1.0;
-      const effSuperN = 2.0 + (silhouette.superellipse - 2.0) * mountCircularBlend;
-      baseR *= superellipseMultiplier(theta, effSuperN);
+
+      // Blend cross-section smoothly back to circular near closed dome crown so pole is strictly circular!
+      const domeCircularBlend = isClosedDome ? 1 - smoothstep(0.74, 0.98, vDesign) : 1.0;
+
+      // Persistent interactive 3D sculpt strokes (C1 smooth, 100% watertight!)
+      const sculpt = evaluateSculptField(
+        u,
+        vDesign,
+        totalHeight,
+        Math.max(24, baseR),
+        config.sculptStrokes
+      );
+      const sculptEnv =
+        smoothstep(mountFlatBandMm * 0.5, mountFlatBandMm + 8, Math.max(0, yLocal)) *
+        (isClosedDome ? 1 - smoothstep(0.76, 0.97, vDesign) : 1.0);
+      const effTheta = theta + sculpt.dThetaRad * sculptEnv;
+
+      // Cross-Section: Circle, Superellipse, Ellipse, Soft Polygon, Concave Square, or Flower + Twist
+      baseR *= evaluateCrossSectionMultiplier(
+        effTheta,
+        vDesign,
+        silhouette,
+        mountCircularBlend * domeCircularBlend
+      );
+      baseR = Math.max(isClosedPole ? 2.4 : 8.0, baseR + sculpt.drMm * sculptEnv);
 
       const bottomFade =
         yLocal < 0
@@ -160,10 +197,13 @@ function createWallEvaluator(
               mountFlatBandMm + 5.5,
               yLocal
             );
+      // Fade surface displacement smoothly to 0 right at the closed dome pole/vent crown
+      const topDomeFade = isClosedDome ? 1 - smoothstep(0.78, 0.985, vDesign) : 1.0;
+      const patternFade = bottomFade * topDomeFade * (1 - sculpt.smoothMask * 0.65 * sculptEnv);
 
       const disp = patternEval({
-        u,
-        theta,
+        u: (((effTheta / (2 * Math.PI)) % 1) + 1) % 1,
+        theta: effTheta,
         v: vDesign,
         y: vDesign * totalHeight,
         baseRadius: baseR,
@@ -175,34 +215,34 @@ function createWallEvaluator(
       let minAllowedWall = wallT;
 
       if (disp.explicitWallThicknessMm !== undefined) {
-        // Completely smooth continuous inner wall; only outer wall carries relief (Basketweave 0.8 -> 2.2 mm)
-        rIn = baseR - wallT;
+        const effWall = wallT * (1 - topDomeFade) + nominalCoreWall * topDomeFade;
+        rIn = baseR - effWall;
         const localWall =
-          wallT * (1 - bottomFade) + disp.explicitWallThicknessMm * bottomFade;
-        minAllowedWall = Math.min(wallT, Math.max(0.75, localWall));
+          wallT * (1 - patternFade) + disp.explicitWallThicknessMm * patternFade;
+        minAllowedWall = Math.min(wallT, Math.max(0.62, localWall));
         rOut = rIn + localWall;
       } else if (disp.uniformWallThicknessMm !== undefined) {
-        // Translucent uniform thin-wall family (Japanese Flute 0.8 - 2.4 mm)
         const thinW = clamp(disp.uniformWallThicknessMm, 0.8, 3.2);
         const effWall = wallT * (1 - bottomFade) + thinW * bottomFade;
-        const outerOffset = disp.outerOffset * bottomFade;
+        const outerOffset = disp.outerOffset * patternFade;
         const innerOffset = outerOffset * clamp(disp.innerFollow, 0, 1);
         rIn = baseR - effWall + innerOffset;
         rOut = baseR + outerOffset;
         minAllowedWall = Math.min(effWall, 0.78);
       } else {
-        const outerOffset = disp.outerOffset * bottomFade;
+        const outerOffset = disp.outerOffset * patternFade;
         const innerOffset = outerOffset * clamp(disp.innerFollow, 0, 1);
         rIn = baseR - wallT + innerOffset;
         rOut = baseR + outerOffset;
       }
 
+      const minInnerLimit = isClosedPole ? 1.2 : isClosedDome ? 8.0 : 10.0;
       if (yLocal >= 0 && yLocal <= mountFlatBandMm + 14) {
         const guardBlend = 1 - smoothstep(mountFlatBandMm, mountFlatBandMm + 14, yLocal);
-        const minRHere = minInnerR * guardBlend + 10 * (1 - guardBlend);
+        const minRHere = minInnerR * guardBlend + minInnerLimit * (1 - guardBlend);
         if (rIn < minRHere) rIn = minRHere;
-      } else if (rIn < 10) {
-        rIn = 10;
+      } else if (rIn < minInnerLimit) {
+        rIn = minInnerLimit;
       }
 
       if (rOut < rIn + minAllowedWall) {
@@ -232,12 +272,241 @@ function closeTopRimFlat(
 }
 
 /**
+ * Watertight 2-manifold spherical pole closure to exact R = 0.0 mm (zero open edges, zero degenerate triangles!):
+ * Uses a SINGLE outer North Pole vertex `(0, yPoleOut, 0)` and a SINGLE inner North Pole vertex
+ * `(0, yPoleIn, 0)` preserving continuous wall thickness all the way to the crown!
+ */
+function closeTopDomePole(
+  mb: SolidMeshBuilder,
+  N: number,
+  outTopRing: Int32Array,
+  inTopRing: Int32Array,
+  yTopRing: number,
+  capWallMm: number
+): void {
+  const yPoleOut = yTopRing + 0.35;
+  const yPoleIn = yTopRing - Math.max(0.8, capWallMm) + 0.15;
+  const vPoleOut = mb.addVertex(0, yPoleOut, 0, capWallMm);
+  const vPoleIn = mb.addVertex(0, yPoleIn, 0, capWallMm);
+
+  for (let s = 0; s < N; s++) {
+    const u0 = s;
+    const u1 = (s + 1) % N;
+    // Outer dome crown fan (+Y outward)
+    mb.addTri(outTopRing[u0], outTopRing[u1], vPoleOut);
+    // Inner dome vault fan (-Y into hollow interior = outward from solid shell!)
+    mb.addTri(inTopRing[u1], inTopRing[u0], vPoleIn);
+  }
+}
+
+/**
+ * Generates a 100% watertight, flat Z=0..3.5 mm annular spider plate with K smoothly sculpted windows
+ * anchored solidly into both the central female coupling hub and the outer shade inner wall.
+ * Supports 4 styles (0% supports, printed upright on Z=0):
+ *  - 'radial'        : 3, 4, or 6 straight radial arms with soft filleted corners
+ *  - 'organic_ovals' : flat disc with 4–6 smooth oval/teardrop cutouts (red-base reference)
+ *  - 'x_corners'     : 4 stylized arms rotated 45° toward corners (white 4-corner shade reference)
+ *  - 'spiral'        : 4–6 graceful curved spiral/petal arms
+ */
+function appendSculptedFlatSpider(
+  mb: SolidMeshBuilder,
+  config: LampConfig,
+  seatY: number,
+  deckH: number,
+  rHubOut: number,
+  minInnerAtBottom: number,
+  evalWall: WallEvaluator,
+  draft: boolean
+): void {
+  const { base, silhouette } = config;
+  const style = base.spiderStyle ?? 'radial';
+  const rawArms = Math.round(base.spiderArmCount || 4);
+
+  let K: number;
+  if (style === 'x_corners') {
+    K = 4;
+  } else if (style === 'radial') {
+    K = rawArms <= 3 ? 3 : rawArms >= 6 ? 6 : 4;
+  } else {
+    // 'organic_ovals' and 'spiral': 4, 5, or 6 windows/arms
+    K = Math.max(4, Math.min(6, rawArms));
+  }
+
+  const S = draft ? 4 : 6; // segments per sector side -> P = 16 (draft) or 24 (final) vertices per window!
+  const P = 4 * S;
+  const sectorSpan = (2 * Math.PI) / K;
+  // In 'x_corners', arms sit at 45°, 135°, 225°, 315° (windows centered at 0°, 90°, 180°, 270°)
+  const angleOffset = style === 'x_corners' ? Math.PI / 4 : 0;
+  const spiralTwistMax = style === 'spiral' ? 0.66 : 0; // ~38° graceful spiral sweep
+
+  const yBot = seatY;
+  const yTop = seatY + deckH;
+  const rInnerAnchor = Math.max(12, rHubOut - 0.9); // embedded 0.9 mm into hub outer wall (clear of inner bore!)
+
+  const rOuterAtTheta = (theta: number): number => {
+    const normU = (((theta / (2 * Math.PI)) % 1) + 1) % 1;
+    const sample = evalWall.sampleOuterAndInner(
+      normU,
+      theta,
+      0,
+      silhouette.height,
+      minInnerAtBottom,
+      deckH + 1.5
+    );
+    // Anchor 0.8 mm into the shade inner wall (never exceeding outer wall!)
+    return Math.min(sample.rOut - 0.3, Math.max(rInnerAnchor + 4.5, sample.rIn + 0.8));
+  };
+
+  const mapSectorToWorld = (k: number, u: number, t: number): { r: number; theta: number } => {
+    const twist = spiralTwistMax * (t * t * (3 - 2 * t));
+    const thetaCenter = angleOffset + (k + 0.5) * sectorSpan;
+    const theta = thetaCenter + u * (sectorSpan * 0.5) + twist;
+    const rOut = rOuterAtTheta(theta);
+    const r = rInnerAnchor + (rOut - rInnerAnchor) * t;
+    return { r, theta };
+  };
+
+  // Pre-allocate K shared radial seams (j = 0..S from t=0 to t=1 along u = -1 of sector k)
+  const seamBot: Int32Array[] = [];
+  const seamTop: Int32Array[] = [];
+  for (let k = 0; k < K; k++) {
+    const sb = new Int32Array(S + 1);
+    const st = new Int32Array(S + 1);
+    for (let j = 0; j <= S; j++) {
+      const t = j / S;
+      const { r, theta } = mapSectorToWorld(k, -1, t);
+      sb[j] = mb.addCyl(r, theta, yBot, deckH);
+      st[j] = mb.addCyl(r, theta, yTop, deckH);
+    }
+    seamBot.push(sb);
+    seamTop.push(st);
+  }
+
+  // Evaluate sculpted window contour (uWin, tWin) aligned 1-to-1 with frame perimeter point (cx, cy)
+  const evalWindowPoint = (cx: number, cy: number): { u: number; t: number } => {
+    const phi = Math.atan2(cy, cx);
+    const c = Math.cos(phi);
+    const s = Math.sin(phi);
+
+    if (style === 'organic_ovals') {
+      // Plush oval / teardrop cutout with generous rounded fillets (red-base photo reference)
+      const dropWiden = 1.0 + 0.14 * s;
+      return {
+        u: clamp(0.71 * dropWiden * c, -0.86, 0.86),
+        t: clamp(0.5 + 0.34 * s, 0.14, 0.86),
+      };
+    }
+
+    if (style === 'x_corners') {
+      // Stylized wide fillets pointing cleanly into the 4 corners (white 4-point shade reference)
+      const p = 2.6;
+      const rSE = Math.pow(Math.pow(Math.abs(c), p) + Math.pow(Math.abs(s), p), -1 / p);
+      return {
+        u: clamp(0.78 * rSE * c, -0.88, 0.88),
+        t: clamp(0.5 + 0.35 * rSE * s, 0.13, 0.87),
+      };
+    }
+
+    if (style === 'spiral') {
+      // Soft petal cutout twisted along the radial spiral
+      const p = 2.4;
+      const rSE = Math.pow(Math.pow(Math.abs(c), p) + Math.pow(Math.abs(s), p), -1 / p);
+      return {
+        u: clamp(0.74 * rSE * c, -0.86, 0.86),
+        t: clamp(0.5 + 0.34 * rSE * s, 0.14, 0.86),
+      };
+    }
+
+    // 'radial': classic 3 / 4 / 6 straight radial spokes with smooth filleted corners
+    const p = 3.2;
+    const rSE = Math.pow(Math.pow(Math.abs(c), p) + Math.pow(Math.abs(s), p), -1 / p);
+    const uScale = K === 3 ? 0.84 : K === 4 ? 0.81 : 0.76;
+    return {
+      u: clamp(uScale * rSE * c, -0.89, 0.89),
+      t: clamp(0.5 + 0.36 * rSE * s, 0.13, 0.87),
+    };
+  };
+
+  for (let k = 0; k < K; k++) {
+    const kNext = (k + 1) % K;
+    const frameBot = new Int32Array(P);
+    const frameTop = new Int32Array(P);
+    const winBot = new Int32Array(P);
+    const winTop = new Int32Array(P);
+
+    for (let p = 0; p < P; p++) {
+      let cx: number;
+      let cy: number;
+      if (p < S) {
+        // Bottom edge t = 0: u from -1 -> +1
+        const f = p / S;
+        cx = -1 + 2 * f;
+        cy = -1;
+        if (p === 0) {
+          frameBot[p] = seamBot[k][0];
+          frameTop[p] = seamTop[k][0];
+        } else {
+          const pt = mapSectorToWorld(k, cx, 0);
+          frameBot[p] = mb.addCyl(pt.r, pt.theta, yBot, deckH);
+          frameTop[p] = mb.addCyl(pt.r, pt.theta, yTop, deckH);
+        }
+      } else if (p < 2 * S) {
+        // Right radial seam u = +1: t from 0 -> 1 (shared with seam[kNext]!)
+        const j = p - S;
+        cx = 1;
+        cy = -1 + (2 * j) / S;
+        frameBot[p] = seamBot[kNext][j];
+        frameTop[p] = seamTop[kNext][j];
+      } else if (p < 3 * S) {
+        // Top edge t = 1: u from +1 -> -1
+        const j = p - 2 * S;
+        cx = 1 - (2 * j) / S;
+        cy = 1;
+        if (j === 0) {
+          frameBot[p] = seamBot[kNext][S];
+          frameTop[p] = seamTop[kNext][S];
+        } else {
+          const pt = mapSectorToWorld(k, cx, 1);
+          frameBot[p] = mb.addCyl(pt.r, pt.theta, yBot, deckH);
+          frameTop[p] = mb.addCyl(pt.r, pt.theta, yTop, deckH);
+        }
+      } else {
+        // Left radial seam u = -1: t from 1 -> 0 (shared with seam[k]!)
+        const j = 4 * S - p;
+        cx = -1;
+        cy = -1 + (2 * j) / S;
+        frameBot[p] = seamBot[k][j];
+        frameTop[p] = seamTop[k][j];
+      }
+
+      const w = evalWindowPoint(cx, cy);
+      const wPt = mapSectorToWorld(k, w.u, w.t);
+      winBot[p] = mb.addCyl(wPt.r, wPt.theta, yBot, deckH);
+      winTop[p] = mb.addCyl(wPt.r, wPt.theta, yTop, deckH);
+    }
+
+    for (let p = 0; p < P; p++) {
+      const pn = (p + 1) % P;
+      // Top horizontal face (+Y)
+      mb.addQuad(frameTop[p], winTop[p], winTop[pn], frameTop[pn]);
+      // Bottom horizontal face (-Y)
+      mb.addQuad(frameBot[p], frameBot[pn], winBot[pn], winBot[p]);
+      // Inner window vertical wall (outward into open window cutout)
+      mb.addQuad(winBot[p], winBot[pn], winTop[pn], winTop[p]);
+      // Outer/Inner circular perimeter walls ONLY on t=0 (0..S-1) and t=1 (2S..3S-1), NEVER on shared radial seams!
+      if (p < S || (p >= 2 * S && p < 3 * S)) {
+        mb.addQuad(frameBot[p], frameTop[p], frameTop[pn], frameBot[pn]);
+      }
+    }
+  }
+}
+
+/**
  * Builds the independent SHADE part for Two-Part Lamp mode!
- * Supports:
- *  - Gravity Seat ("Asiento directo"), Floating 4-Spoke 3 mm Spider ("Araña interna" with optional bayonet),
- *    Helical 3D Screw Thread ("Rosca 3D"), Bayonet ("Bayoneta ¼"), and Friction Collar!
- *  - Optional organic Wavy Bottom Skirt ("Onda en borde inferior", 0 - 15 mm, 3 - 8 waves) hanging
- *    gracefully below the internal collar/spider ring, 100% watertight 2-manifold!
+ * v2.0 FDM Upgrade:
+ *  - When `coupling === 'spider'`, the 4 thin (3 mm) radial spider arms slope UPWARD at **45°**
+ *    from the central collar toward the shade's inner wall so that when the shade is flipped 180°
+ *    upside-down onto its flat top rim in Bambu Studio, the arms & collar print 100% WITHOUT SUPPORTS!
  */
 function buildCoupledShade(
   config: LampConfig,
@@ -266,7 +535,15 @@ function buildCoupledShade(
   const rHubOut =
     rMaleBase + effectiveClr + extraCouplingDepth + Math.max(2.6, wallT + 0.6);
 
-  const deckH = 3.2; // Structural bottom flange / 4-spoke spider arm vertical thickness
+  // Optional Organic Wavy Bottom Skirt (0 - 15 mm, 3 - 8 waves)
+  const waveAmp = clamp(silhouette.skirtWaveAmp || 0, 0, 15);
+  const waveCount = Math.max(3, Math.min(8, Math.round(silhouette.skirtWaveCount || 5)));
+  const hasWavySkirt = waveAmp > 0.15;
+
+  // When coupling === 'spider' and skirtWaveAmp === 0, the central bayonet/hub ring and 4 flat spokes
+  // sit FLUSH on Z = 0 .. 3.5 mm directly connected to the shade bottom rim (prints upright 0% supports!).
+  // Only when wavy skirt > 0 mm do the 4 spider arms slope upward at 45° for 180° upside-down printing.
+  const deckH = isSpider && !hasWavySkirt ? 3.5 : 3.2;
   const collarH = getCouplingHeightMm(base);
 
   const sampleBaseR = evaluateSilhouetteRadius(0, silhouette);
@@ -274,13 +551,11 @@ function buildCoupledShade(
     ? sampleBaseR - wallT > rHubOut + 5.0
     : base.shadeVentilation && sampleBaseR - wallT > rHubOut + 8.5;
 
-  // For Floating Spider ("Araña interna"): exact 4 slender ~3 mm radial arms!
   let spokeCount = mount.ventSlots;
   let spokeFillRatio = 0.28;
   if (isSpider) {
     spokeCount = 4;
     const midArmR = Math.max(36, (rHubOut + Math.max(rHubOut + 10, sampleBaseR)) * 0.5);
-    // 4 arms each ~3.2 mm wide -> total angular fill = (4 * 3.2) / (2 * PI * midArmR)
     spokeFillRatio = clamp((4 * 3.2) / (2 * Math.PI * midArmR), 0.055, 0.16);
   }
 
@@ -292,6 +567,7 @@ function buildCoupledShade(
   const D = deckSubdivs;
   const C = deckSubdivs + upperCollarSubdivs;
 
+  // Vertical rows for the female coupling hub (always sitting at seatY .. seatY + collarH)
   const collarY: number[] = [];
   for (let i = 0; i <= D; i++) {
     collarY.push(seatY + (deckH * i) / D);
@@ -300,25 +576,63 @@ function buildCoupledShade(
     collarY.push(seatY + deckH + ((collarH - deckH) * i) / upperCollarSubdivs);
   }
 
-  const shellY: number[] = [];
-  for (let i = 0; i <= D; i++) {
-    shellY.push(collarY[i]);
-  }
-  const restH = Math.max(10, shadeHeight - deckH);
-  const bodySegs = Math.max(12, heightSegs);
-  for (let j = 1; j <= bodySegs; j++) {
-    shellY.push(seatY + deckH + (restH * j) / bodySegs);
-  }
-  const M = shellY.length - 1;
+  // Only slope spider arms at 45° when a wavy skirt drops below seatY (so flipping 180° prints support-free).
+  // With flat bottom (skirtWaveAmp === 0), spider uses our sculpted flat Z=0..3.5 mm bracket (4 selectable styles!).
+  const useFlatSculptedSpider = isSpider && canVent && !hasWavySkirt;
+  const useSlopedSpider = isSpider && canVent && hasWavySkirt;
+  const nominalSpan = Math.max(0, sampleBaseR - wallT - rHubOut);
+  const spiderWallAnchorOffsetMm = useSlopedSpider
+    ? clamp(nominalSpan, 6.0, Math.max(10.0, shadeHeight * 0.42))
+    : 0;
 
+  // Build shade vertical rows:
+  // If sloped spider:
+  //   rows [0 .. S_LOW] cover seatY .. seatY + spiderWallAnchorOffsetMm (lower shade wall below spider arms)
+  //   rows [S_LOW .. S_LOW + D] cover the exact anchor band [seatY + offset .. seatY + offset + deckH] matching hubOut[0..D]!
+  //   rows [S_LOW + D .. M] cover the upper shade wall up to seatY + shadeHeight!
+  // If flat flange: S_LOW = 0, so rows [0..D] sit at seatY .. seatY + deckH!
+  const shellY: number[] = [];
+  const S_LOW = useSlopedSpider ? Math.max(4, Math.round((spiderWallAnchorOffsetMm / shadeHeight) * heightSegs)) : 0;
+
+  if (useSlopedSpider) {
+    for (let i = 0; i < S_LOW; i++) {
+      shellY.push(seatY + (spiderWallAnchorOffsetMm * i) / S_LOW);
+    }
+    for (let i = 0; i <= D; i++) {
+      shellY.push(seatY + spiderWallAnchorOffsetMm + (deckH * i) / D);
+    }
+    const startUpper = spiderWallAnchorOffsetMm + deckH;
+    const upperSpan = Math.max(10, shadeHeight - startUpper);
+    const upperSegs = Math.max(10, heightSegs - S_LOW);
+    for (let j = 1; j <= upperSegs; j++) {
+      shellY.push(seatY + startUpper + (upperSpan * j) / upperSegs);
+    }
+  } else {
+    for (let i = 0; i <= D; i++) {
+      shellY.push(collarY[i]);
+    }
+    const restH = Math.max(10, shadeHeight - deckH);
+    const bodySegs = Math.max(12, heightSegs);
+    for (let j = 1; j <= bodySegs; j++) {
+      shellY.push(seatY + deckH + (restH * j) / bodySegs);
+    }
+  }
+
+  const M = shellY.length - 1;
+  const ANCHOR_START = S_LOW;
+  const ANCHOR_END = S_LOW + D;
   const minInnerAtBottom = canVent ? rHubOut + 5.5 : rHubOut + 1.2;
 
-  // 1. Allocate outer & inner shade shell rings (rows 0 .. M)
+  // 1. Allocate outer & inner shade shell rings
+  const isClosedPole = Boolean(silhouette.closeTopDome) && mount.type === 'led_kit_001';
+  const capWallMm = config.family === 'organic' ? 1.2 : wallT;
   const outRing: Int32Array[] = [];
   const inRing: Int32Array[] = [];
   for (let row = 0; row <= M; row++) {
     const yWorld = shellY[row];
     const yLocal = yWorld - seatY;
+    const vRow = clamp(yLocal / Math.max(shadeHeight, 1), 0, 1);
+    const yInOffset = isClosedPole ? capWallMm * smoothstep(0.74, 1.0, vRow) : 0;
     const oArr = new Int32Array(N);
     const iArr = new Int32Array(N);
     for (let u = 0; u < N; u++) {
@@ -332,25 +646,21 @@ function buildCoupledShade(
         deckH + 1.5
       );
       oArr[u] = mb.addCyl(s.rOut, theta, yWorld, s.localThickness);
-      iArr[u] = mb.addCyl(s.rIn, theta, yWorld, s.localThickness);
+      iArr[u] = mb.addCyl(s.rIn, theta, yWorld - yInOffset, s.localThickness);
     }
     outRing.push(oArr);
     inRing.push(iArr);
   }
 
-  // 2. Optional Organic Wavy Bottom Skirt ("Onda en borde inferior / Falda", 0 - 15 mm, 3 - 8 waves)
-  const waveAmp = clamp(silhouette.skirtWaveAmp || 0, 0, 15);
-  const waveCount = Math.max(3, Math.min(8, Math.round(silhouette.skirtWaveCount || 5)));
-  const hasWavySkirt = waveAmp > 0.15;
+  // 2. Optional Organic Wavy Bottom Skirt (0 - 15 mm, 3 - 8 waves)
   const S_SKIRT = hasWavySkirt ? (draft ? 4 : 8) : 0;
 
   const skirtOut: Int32Array[] = [];
   const skirtIn: Int32Array[] = [];
   if (hasWavySkirt) {
-    // skirtOut[0] shares exact indices with outRing[0]; skirtIn[0] shares exact indices with inRing[0]!
     skirtOut.push(outRing[0]);
     skirtIn.push(inRing[0]);
-    const minSkirtDrop = 2.0; // clean solid skirt rim even at wave peaks
+    const minSkirtDrop = 2.0;
     for (let k = 1; k <= S_SKIRT; k++) {
       const frac = k / S_SKIRT;
       const oArr = new Int32Array(N);
@@ -401,12 +711,16 @@ function buildCoupledShade(
     const u0 = s;
     const u1 = (s + 1) % N;
 
-    // Shade outer wall (0 .. M)
+    // Outer wall (0 .. M)
     for (let row = 0; row < M; row++) {
       mb.addQuad(outRing[row][u0], outRing[row][u1], outRing[row + 1][u1], outRing[row + 1][u0]);
     }
-    // Shade inner wall above bottom flange (D .. M)
-    for (let row = D; row < M; row++) {
+    // Inner wall below anchor band (0 .. ANCHOR_START) — only when sloped spider raises anchor above seatY!
+    for (let row = 0; row < ANCHOR_START; row++) {
+      mb.addQuad(inRing[row][u0], inRing[row + 1][u0], inRing[row + 1][u1], inRing[row][u1]);
+    }
+    // Inner wall above anchor band (ANCHOR_END .. M)
+    for (let row = ANCHOR_END; row < M; row++) {
       mb.addQuad(inRing[row][u0], inRing[row + 1][u0], inRing[row + 1][u1], inRing[row][u1]);
     }
 
@@ -418,25 +732,21 @@ function buildCoupledShade(
     for (let row = D; row < C; row++) {
       mb.addQuad(hubOut[row][u0], hubOut[row][u1], hubOut[row + 1][u1], hubOut[row + 1][u0]);
     }
-    // Female coupling hub top rim (+Y at row = C)
+    // Hub top rim (+Y) and bottom rim (-Y)
     mb.addQuad(hubIn[C][u0], hubOut[C][u0], hubOut[C][u1], hubIn[C][u1]);
-
-    // Hub bottom rim (-Y at row = 0)
     mb.addQuad(hubIn[0][u0], hubIn[0][u1], hubOut[0][u1], hubOut[0][u0]);
 
-    // Outer shell bottom closing: either flat at row = 0 OR extended downward into the Wavy Skirt!
+    // Outer shell bottom closing (flat or wavy skirt!)
     if (!hasWavySkirt) {
       mb.addQuad(inRing[0][u0], inRing[0][u1], outRing[0][u1], outRing[0][u0]);
     } else {
       for (let k = 0; k < S_SKIRT; k++) {
-        // Outer skirt descending: skirtOut[k+1] is BELOW skirtOut[k], so outward CCW is (k+1, u0) -> (k+1, u1) -> (k, u1) -> (k, u0)
         mb.addQuad(
           skirtOut[k + 1][u0],
           skirtOut[k + 1][u1],
           skirtOut[k][u1],
           skirtOut[k][u0]
         );
-        // Inner skirt descending (inward facing)
         mb.addQuad(
           skirtIn[k + 1][u0],
           skirtIn[k][u0],
@@ -444,7 +754,6 @@ function buildCoupledShade(
           skirtIn[k + 1][u1]
         );
       }
-      // Close bottom wavy edge (-Y) at row = S_SKIRT
       mb.addQuad(
         skirtIn[S_SKIRT][u0],
         skirtIn[S_SKIRT][u1],
@@ -453,40 +762,171 @@ function buildCoupledShade(
       );
     }
 
-    if (!canVent || isSpoke[s]) {
-      // Solid spoke / spider arm / flange bridging hubOut <-> inRing
-      mb.addQuad(hubOut[D][u0], inRing[D][u0], inRing[D][u1], hubOut[D][u1]);
-      mb.addQuad(hubOut[0][u0], hubOut[0][u1], inRing[0][u1], inRing[0][u0]);
+    if (!useFlatSculptedSpider && (!canVent || isSpoke[s])) {
+      // Solid spoke / 45° inclined spider arm bridging hubOut[0..D] <-> inRing[ANCHOR_START..ANCHOR_END]!
+      mb.addQuad(hubOut[D][u0], inRing[ANCHOR_END][u0], inRing[ANCHOR_END][u1], hubOut[D][u1]);
+      mb.addQuad(hubOut[0][u0], hubOut[0][u1], inRing[ANCHOR_START][u1], inRing[ANCHOR_START][u0]);
     } else {
-      // Open radial ventilation window / spider opening!
+      // Open ventilation window / cleanly closed walls for sculpted flat Z=0 spider plate
       for (let row = 0; row < D; row++) {
         mb.addQuad(hubOut[row][u0], hubOut[row][u1], hubOut[row + 1][u1], hubOut[row + 1][u0]);
-        mb.addQuad(inRing[row][u0], inRing[row + 1][u0], inRing[row + 1][u1], inRing[row][u1]);
+        mb.addQuad(
+          inRing[ANCHOR_START + row][u0],
+          inRing[ANCHOR_START + row + 1][u0],
+          inRing[ANCHOR_START + row + 1][u1],
+          inRing[ANCHOR_START + row][u1]
+        );
       }
     }
   }
 
-  // 5. Vertical side walls closing every spoke / spider arm boundary
-  if (canVent) {
+  // 5. Vertical/sloped side walls closing every spoke / 45° spider arm boundary (zero T-junctions!)
+  if (canVent && !useFlatSculptedSpider) {
     for (let u = 0; u < N; u++) {
       const prev = isSpoke[(u - 1 + N) % N];
       const next = isSpoke[u];
       if (prev === next) continue;
       for (let row = 0; row < D; row++) {
         if (prev === 1 && next === 0) {
-          mb.addQuad(hubOut[row][u], hubOut[row + 1][u], inRing[row + 1][u], inRing[row][u]);
+          mb.addQuad(
+            hubOut[row][u],
+            hubOut[row + 1][u],
+            inRing[ANCHOR_START + row + 1][u],
+            inRing[ANCHOR_START + row][u]
+          );
         } else {
-          mb.addQuad(hubOut[row][u], inRing[row][u], inRing[row + 1][u], hubOut[row + 1][u]);
+          mb.addQuad(
+            hubOut[row][u],
+            inRing[ANCHOR_START + row][u],
+            inRing[ANCHOR_START + row + 1][u],
+            hubOut[row + 1][u]
+          );
         }
       }
     }
   }
 
-  closeTopRimFlat(mb, N, outRing[M], inRing[M]);
+  if (useFlatSculptedSpider) {
+    appendSculptedFlatSpider(
+      mb,
+      config,
+      seatY,
+      deckH,
+      rHubOut,
+      minInnerAtBottom,
+      evalWall,
+      draft
+    );
+  }
+
+  if (isClosedPole) {
+    closeTopDomePole(mb, N, outRing[M], inRing[M], shellY[M], capWallMm);
+  } else {
+    closeTopRimFlat(mb, N, outRing[M], inRing[M]);
+  }
+
+  // Append optional family-specific extruded solids (e.g. Organic Core + Extruded Fins/Ribbons)
+  getLampFamily(config.family).appendExtraGeometry?.({
+    mb,
+    config,
+    seatY,
+    shadeHeight,
+    draft,
+    invertedForPendant: false,
+  });
+
   return mb;
 }
 
-/** Monoblock LED Kit 001 shell (for single-piece or pendant lamps). */
+/**
+ * v2.0 Optional Dual Internal Diffuser Cylinder ("Difusor Interno"):
+ * Independent smooth white translucent cylinder (1.0 mm wall thickness) that seats cleanly
+ * inside the Base neck bore inside the outer shade, softening bulb glare!
+ * 100% watertight 2-manifold!
+ */
+function buildInternalDiffuser(
+  config: LampConfig,
+  seatY: number,
+  draft: boolean
+): SolidMeshBuilder {
+  const mb = new SolidMeshBuilder();
+  const N = draft ? 64 : 112;
+  const wallT = 1.0; // Exact 1.0 mm translucent wall!
+  const rNeck = getEffectiveNeckRadius(config);
+  const { silhouette, mount } = config;
+
+  // Determine safe outer radius that seats cleanly on the top of the base collar without colliding with the LED puck!
+  const baseInnerBore =
+    mount.type === 'led_kit_001'
+      ? Math.max(getLedKit001Dimensions(mount).cavityRadiusMm + 0.5, rNeck - 1.6)
+      : Math.max(getSocketE26Dimensions(mount).holeRadiusMm + 1.5, rNeck - 3.2);
+
+  // Sample minimum inner radius along shade height so diffuser never clips the outer shade
+  let minShadeIn = Infinity;
+  for (let i = 0; i <= 10; i++) {
+    const r = evaluateSilhouetteRadius(i / 10, silhouette) - mount.wallThickness - 4.0;
+    if (r < minShadeIn) minShadeIn = r;
+  }
+
+  const rSeatOut = Math.max(18, Math.min(baseInnerBore - 0.35, minShadeIn));
+  const rBodyOut = Math.max(18, Math.min(rNeck - 2.0, minShadeIn));
+  const rBodyIn = Math.max(16, rBodyOut - wallT);
+  const rSeatIn = Math.max(16, rSeatOut - wallT);
+
+  const collarClearY = mount.type === 'led_kit_001' ? getCouplingHeightMm(config.base) : 0;
+  const diffHeight = Math.max(50, silhouette.height * 0.86 - collarClearY);
+  const yStart = seatY + collarClearY;
+  const ySeatStep = seatY + 4.5;
+  const yFlareEnd = ySeatStep + Math.abs(rBodyOut - rSeatOut);
+  const yEnd = seatY + diffHeight;
+
+  const yLevels =
+    Math.abs(rBodyOut - rSeatOut) > 0.4
+      ? [yStart, ySeatStep, Math.min(yEnd - 4, yFlareEnd), yEnd]
+      : [yStart, ySeatStep, yEnd];
+
+  const rOutLevels =
+    yLevels.length === 4
+      ? [rSeatOut, rSeatOut, rBodyOut, rBodyOut]
+      : [rSeatOut, rBodyOut, rBodyOut];
+
+  const rInLevels =
+    yLevels.length === 4
+      ? [rSeatIn, rSeatIn, rBodyIn, rBodyIn]
+      : [rSeatIn, rBodyIn, rBodyIn];
+
+  const K = yLevels.length;
+  const outRings: Int32Array[] = [];
+  const inRings: Int32Array[] = [];
+
+  for (let k = 0; k < K; k++) {
+    const oArr = new Int32Array(N);
+    const iArr = new Int32Array(N);
+    for (let u = 0; u < N; u++) {
+      const theta = (2 * Math.PI * u) / N;
+      oArr[u] = mb.addCyl(rOutLevels[k], theta, yLevels[k], wallT);
+      iArr[u] = mb.addCyl(rInLevels[k], theta, yLevels[k], wallT);
+    }
+    outRings.push(oArr);
+    inRings.push(iArr);
+  }
+
+  for (let s = 0; s < N; s++) {
+    const u0 = s;
+    const u1 = (s + 1) % N;
+    for (let k = 0; k < K - 1; k++) {
+      mb.addQuad(outRings[k][u0], outRings[k][u1], outRings[k + 1][u1], outRings[k + 1][u0]);
+      mb.addQuad(inRings[k][u0], inRings[k + 1][u0], inRings[k + 1][u1], inRings[k][u1]);
+    }
+    // Top rim (+Y) & bottom seating rim (-Y)
+    mb.addQuad(inRings[K - 1][u0], outRings[K - 1][u0], outRings[K - 1][u1], inRings[K - 1][u1]);
+    mb.addQuad(inRings[0][u0], inRings[0][u1], outRings[0][u1], outRings[0][u0]);
+  }
+
+  return mb;
+}
+
+/** Monoblock LED Kit 001 shell (with 45° internal chamfer + 45° peaked USB cord roof!). */
 function buildLedKit001Monoblock(
   config: LampConfig,
   yMaxLocal: number,
@@ -502,9 +942,10 @@ function buildLedKit001Monoblock(
   const evalWall = createWallEvaluator(config, invertedForPendant);
 
   const dim = getLedKit001Dimensions(mount);
-  const hSlot = dim.usbSlotHeightMm;
-  const hCavity = dim.cavityHeightMm;
-  const hDeck = dim.deckTopMm;
+  const hSlot = dim.usbSlotHeightMm; // 5.0 mm
+  const hCavity = dim.cavityHeightMm; // 8.5 mm
+  const hChamfer = dim.chamferTopMm; // 12.5 mm (45° internal chamfer!)
+  const hDeck = dim.deckTopMm; // 14.5 mm
   const rCav = dim.cavityRadiusMm;
   const rHole = dim.lightHoleRadiusMm;
   const rHubOut = dim.hubOuterRadiusMm;
@@ -526,9 +967,13 @@ function buildLedKit001Monoblock(
   const DECK_ROW = 3;
   const minInnerAtMount = canVent ? rHubOut + 8.0 : rCav + 0.4;
 
-  // Optional wavy open rim for Pendant mode (`invertedForPendant === true` => open rim is at row M!)
   const waveAmp = invertedForPendant ? clamp(silhouette.skirtWaveAmp || 0, 0, 15) : 0;
   const waveCount = Math.max(3, Math.min(8, Math.round(silhouette.skirtWaveCount || 5)));
+
+  // 45° peaked gable lift across USB cord slot roof (capped safely below hCavity!)
+  const gablePeak = Math.min(dim.usbSlotWidthMm * 0.5, (hCavity - hSlot) * 0.78);
+  const gableLiftAtU = (u: number) =>
+    u <= 0 || u >= usbSlotSegs ? 0 : (1 - Math.abs((2 * u) / usbSlotSegs - 1)) * gablePeak;
 
   const outRing: Int32Array[] = [];
   const inRing: Int32Array[] = [];
@@ -540,7 +985,8 @@ function buildLedKit001Monoblock(
     const iArr = new Int32Array(N).fill(-1);
     for (let u = 0; u < N; u++) {
       const theta = thetas[u];
-      const y = yBase + rowWaveBlend * waveAmp * (0.5 + 0.5 * Math.sin(theta * waveCount));
+      const yLift = row === 1 ? gableLiftAtU(u) : 0;
+      const y = yBase + yLift + rowWaveBlend * waveAmp * (0.5 + 0.5 * Math.sin(theta * waveCount));
       const s = evalWall.sampleOuterAndInner(
         u / N,
         theta,
@@ -576,14 +1022,16 @@ function buildLedKit001Monoblock(
   for (let u = 0; u < N; u++) {
     const theta = thetas[u];
     const insideUsbInterior = u > 0 && u < usbSlotSegs;
+    const ySlotU = hSlot + gableLiftAtU(u);
     if (!insideUsbInterior) cavRow0[u] = mb.addCyl(rCav, theta, 0, wallT);
-    cavRowSlot[u] = mb.addCyl(rCav, theta, hSlot, wallT);
+    cavRowSlot[u] = mb.addCyl(rCav, theta, ySlotU, wallT);
     cavRowTop[u] = mb.addCyl(rCav, theta, hCavity, wallT);
-    holeRowBot[u] = mb.addCyl(rHole, theta, hCavity, dim.retainerThicknessMm);
+    // 45° internal chamfer: holeRowBot sits at hChamfer (12.5 mm) instead of flat hCavity (8.5 mm)!
+    holeRowBot[u] = mb.addCyl(rHole, theta, hChamfer, dim.retainerThicknessMm);
     holeRowTop[u] = mb.addCyl(rHole, theta, hDeck, dim.retainerThicknessMm);
     if (canVent) {
       if (!insideUsbInterior) hubOut0[u] = mb.addCyl(rHubOut, theta, 0, wallT);
-      hubOutSlot[u] = mb.addCyl(rHubOut, theta, hSlot, wallT);
+      hubOutSlot[u] = mb.addCyl(rHubOut, theta, ySlotU, wallT);
       hubOutCav[u] = mb.addCyl(rHubOut, theta, hCavity, wallT);
       hubOutDeck[u] = mb.addCyl(rHubOut, theta, hDeck, wallT);
     }
@@ -601,6 +1049,7 @@ function buildLedKit001Monoblock(
     }
 
     mb.addQuad(cavRowSlot[u0], cavRowTop[u0], cavRowTop[u1], cavRowSlot[u1]);
+    // 45° self-supporting internal ceiling chamfer (cavRowTop at 8.5 mm -> holeRowBot at 12.5 mm)!
     mb.addQuad(holeRowBot[u0], holeRowBot[u1], cavRowTop[u1], cavRowTop[u0]);
     mb.addQuad(holeRowBot[u0], holeRowTop[u0], holeRowTop[u1], holeRowBot[u1]);
 
@@ -677,7 +1126,27 @@ function buildLedKit001Monoblock(
     }
   }
 
-  closeTopRimFlat(mb, N, outRing[M], inRing[M]);
+  const isClosedPoleMono =
+    Boolean(config.silhouette.closeTopDome) &&
+    !invertedForPendant &&
+    yMaxLocal >= config.silhouette.height * 0.9;
+  const monoCapWall = config.family === 'organic' ? 1.2 : wallT;
+
+  if (isClosedPoleMono) {
+    closeTopDomePole(mb, N, outRing[M], inRing[M], yMaxLocal, monoCapWall);
+  } else {
+    closeTopRimFlat(mb, N, outRing[M], inRing[M]);
+  }
+  if (yMaxLocal >= config.silhouette.height * 0.5) {
+    getLampFamily(config.family).appendExtraGeometry?.({
+      mb,
+      config,
+      seatY: 0,
+      shadeHeight: yMaxLocal,
+      draft: radialSegs <= 112,
+      invertedForPendant,
+    });
+  }
   return mb;
 }
 
@@ -795,11 +1264,22 @@ function buildE26Monoblock(
   }
 
   closeTopRimFlat(mb, N, outRing[M], inRing[M]);
+  if (yMaxLocal >= config.silhouette.height * 0.5) {
+    getLampFamily(config.family).appendExtraGeometry?.({
+      mb,
+      config,
+      seatY: 0,
+      shadeHeight: yMaxLocal,
+      draft: radialSegs <= 112,
+      invertedForPendant,
+    });
+  }
   return mb;
 }
 
 /**
- * Main entry point: generates watertight 3D lamp mesh(es) and real-time print metrics.
+ * Main entry point: generates watertight 3D lamp mesh(es) (Base, Shade, optional Internal Diffuser)
+ * and real-time print metrics.
  */
 export function generateLampGeometry(
   config: LampConfig,
@@ -824,7 +1304,7 @@ export function generateLampGeometry(
   const partStats: Array<ReturnType<typeof finalizePartGeometry>> = [];
 
   if (clipHeightMm !== undefined && clipHeightMm > 0) {
-    const clippedH = Math.min(config.silhouette.height, Math.max(12, clipHeightMm));
+    const clippedH = Math.min(config.silhouette.height, Math.max(15, clipHeightMm));
     const mb =
       config.silhouette.buildMode === 'two_part' && !isPendant && config.base.style !== 'tripod'
         ? buildIndependentBase(config, draft, clippedH)
@@ -904,6 +1384,29 @@ export function generateLampGeometry(
       overhang: shadeFin.overhang,
     });
     partStats.push(shadeFin);
+
+    // Optional 3rd independent solid mesh: Dual Internal Diffuser (1.0 mm smooth white translucent cylinder)
+    if (config.silhouette.includeDiffuser) {
+      const diffMb = buildInternalDiffuser(config, seatY, draft);
+      const diffRaw = diffMb.buildBuffers(undefined);
+      const diffFin = finalizePartGeometry(
+        diffRaw.positions,
+        diffRaw.indices,
+        diffRaw.thickness,
+        config.visual.overhangAngle,
+        !doValidate
+      );
+      parts.push({
+        name: 'diffuser',
+        role: 'diffuser',
+        positions: diffRaw.positions,
+        normals: diffFin.normals,
+        indices: diffRaw.indices,
+        thickness: diffRaw.thickness,
+        overhang: diffFin.overhang,
+      });
+      partStats.push(diffFin);
+    }
   } else {
     const mb =
       config.mount.type === 'led_kit_001'

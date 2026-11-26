@@ -259,6 +259,7 @@ export function aggregateMetrics(
   let totalVolMm3 = 0;
   let baseVolMm3 = 0;
   let shadeVolMm3 = 0;
+  let diffuserVolMm3 = 0;
   let totalOvArea = 0;
   let totalArea = 0;
   let totalTriangles = 0;
@@ -290,6 +291,7 @@ export function aggregateMetrics(
     const absVol = Math.abs(st.signedVolumeMm3);
     totalVolMm3 += absVol;
     if (parts[p].role === 'base') baseVolMm3 += absVol;
+    else if (parts[p].role === 'diffuser') diffuserVolMm3 += absVol;
     else shadeVolMm3 += absVol;
     totalOvArea += st.overhangAreaMm2;
     totalArea += st.totalAreaMm2;
@@ -303,6 +305,7 @@ export function aggregateMetrics(
   const gramsPLA = volumeCm3 * PLA_DENSITY_G_PER_CM3;
   const baseGramsPLA = (baseVolMm3 / 1000.0) * PLA_DENSITY_G_PER_CM3;
   const shadeGramsPLA = (shadeVolMm3 / 1000.0) * PLA_DENSITY_G_PER_CM3;
+  const diffuserGramsPLA = (diffuserVolMm3 / 1000.0) * PLA_DENSITY_G_PER_CM3;
   const overhangPercent = totalArea > 0 ? (totalOvArea / totalArea) * 100 : 0;
   const widthMm = Number.isFinite(maxX - minX) ? maxX - minX : 0;
   const heightMm = Number.isFinite(maxY - minY) ? maxY - minY : 0;
@@ -318,6 +321,7 @@ export function aggregateMetrics(
     gramsPLA,
     baseGramsPLA,
     shadeGramsPLA,
+    diffuserGramsPLA,
     overhangPercent,
     overhangAngle,
     totalTriangles,
