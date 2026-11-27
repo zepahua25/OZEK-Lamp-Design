@@ -205,7 +205,8 @@ export const App: React.FC = () => {
           base.silhouette.baseRadius = spherePts[0].r;
           base.silhouette.midRadius = spherePts[2].r;
           base.silhouette.topRadius = spherePts[4].r;
-          base.silhouette.height = 172;
+          base.silhouette.height = 170;
+          base.silhouette.shadeScale = 1.0;
           base.silhouette.skirtWaveAmp = 0;
           base.silhouette.closeTopDome = true; // Closed full sphere by default for Organic Sphere!
         }

@@ -35,7 +35,7 @@ export type ViewAssemblyMode = 'assembled' | 'exploded' | 'shade_only' | 'base_o
 
 export type UiMode = 'basic' | 'expert';
 
-export type LampSizePreset = 'S' | 'M' | 'L';
+export type LampSizePreset = 'XS' | 'S' | 'M' | 'L' | 'XL';
 
 export type MaterialPresetId =
   | 'ozek_sand'
@@ -77,6 +77,8 @@ export interface SilhouetteParams {
   type: SilhouetteType;
   /** Shade height (in two_part mode) or total lamp height (in monoblock mode), mm */
   height: number; // 90 - 250 mm
+  /** Continuous parametric shade-only scale multiplier (0.75 - 1.40, default 1.0); never scales base, socket, or coupling */
+  shadeScale?: number;
   baseRadius: number; // 35 - 115 mm
   midRadius: number; // 35 - 122 mm
   topRadius: number; // 25 - 115 mm

@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { LampConfig, MeshPartData, SculptStroke, SculptToolId } from '../types/lamp';
 import { getCouplingHeightMm, getShadeSeatY } from '../geometry/coupling';
+import { getEffectiveShadeHeight } from '../geometry/silhouette';
 import {
   LampShaderUniforms,
   MATERIAL_PRESETS,
@@ -327,10 +328,11 @@ export class LampScene {
 
     const isPendant = mount.position === 'top';
     const couplingH = getCouplingHeightMm(base);
+    const effShadeH = getEffectiveShadeHeight(silhouette);
     let bulbY: number;
     let lightY: number;
     if (isPendant) {
-      bulbY = silhouette.height * 0.56;
+      bulbY = effShadeH * 0.56;
       lightY = bulbY;
     } else if (isTwoPart) {
       if (mount.type === 'led_kit_001') {
@@ -343,19 +345,19 @@ export class LampScene {
               : seatY + couplingH;
         bulbY = ledCupTopY - 3.0;
         // Point light radiates upward from just above the LED puck into the shade cavity
-        lightY = ledCupTopY + Math.min(silhouette.height * 0.34, 34);
+        lightY = ledCupTopY + Math.min(effShadeH * 0.34, 34);
       } else if (base.style === 'conkel') {
         bulbY = base.height + 28;
         lightY = bulbY;
       } else {
-        bulbY = seatY + Math.min(silhouette.height * 0.46, 52);
+        bulbY = seatY + Math.min(effShadeH * 0.46, 52);
         lightY = bulbY;
       }
     } else {
       bulbY =
         mount.type === 'led_kit_001'
-          ? Math.min(silhouette.height * 0.45, Math.max(36, silhouette.height * 0.34))
-          : silhouette.height * 0.48;
+          ? Math.min(effShadeH * 0.45, Math.max(36, effShadeH * 0.34))
+          : effShadeH * 0.48;
       lightY = bulbY;
     }
 
@@ -378,9 +380,9 @@ export class LampScene {
           : 0;
 
     const bulbVisualY =
-      isTwoPart && assembly === 'shade_only' ? silhouette.height * 0.45 : bulbY;
+      isTwoPart && assembly === 'shade_only' ? effShadeH * 0.45 : bulbY;
     const lightVisualY =
-      isTwoPart && assembly === 'shade_only' ? silhouette.height * 0.45 : lightY;
+      isTwoPart && assembly === 'shade_only' ? effShadeH * 0.45 : lightY;
     const bulbPos = new THREE.Vector3(0, bulbVisualY, 0);
     const lightPos = new THREE.Vector3(0, lightVisualY, 0);
     const bulbColor = kelvinToColor(visual.lightWarmth);
@@ -408,7 +410,7 @@ export class LampScene {
 
     this.cordGroup.visible = isPendant;
     if (isPendant) {
-      this.cordGroup.position.y = silhouette.height;
+      this.cordGroup.position.y = effShadeH;
     }
 
     const colorModeNum =
@@ -451,7 +453,7 @@ export class LampScene {
         entry.uniforms.uStripeRepeats.value = visual.stripeRepeats || 2;
         entry.uniforms.uEdgeDepthMm.value = visual.edgeDepthMm || 2.0;
         entry.uniforms.uShadeMinY.value = isTwoPart ? seatY + shadeExplodeY : 0;
-        entry.uniforms.uShadeHeight.value = silhouette.height;
+        entry.uniforms.uShadeHeight.value = effShadeH;
       } else {
         entry.uniforms.uColorMode.value = 0.0;
         entry.uniforms.uColorByStrand.value = 0.0;
@@ -506,8 +508,9 @@ export class LampScene {
     const isTwoPart = cfg?.silhouette.buildMode === 'two_part' && cfg.mount.position === 'bottom';
     const explodeExtra = isTwoPart && cfg?.visual.assemblyView === 'exploded' ? 58 : 0;
     const totalH = cfg
-      ? (isTwoPart ? getShadeSeatY(cfg) + cfg.silhouette.height : cfg.silhouette.height) +
-        explodeExtra
+      ? (isTwoPart
+          ? getShadeSeatY(cfg) + getEffectiveShadeHeight(cfg.silhouette)
+          : getEffectiveShadeHeight(cfg.silhouette)) + explodeExtra
       : 230;
     this.controls.target.set(52, totalH * 0.5, 0);
     this.camera.position.set(345, totalH * 1.05, 500);
@@ -575,7 +578,7 @@ export class LampScene {
     const p = hit.point;
     const theta = Math.atan2(-p.z, p.x);
     const u = ((theta / (2 * Math.PI)) % 1 + 1) % 1;
-    const vRaw = (p.y - baseY) / Math.max(cfg.silhouette.height, 1);
+    const vRaw = (p.y - baseY) / Math.max(getEffectiveShadeHeight(cfg.silhouette), 1);
     const v = Math.max(0.06, Math.min(0.94, vRaw));
 
     this.onSculptStrokeCb({

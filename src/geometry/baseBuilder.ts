@@ -346,14 +346,17 @@ function appendLedKit001TopCup(
   inner.push({ y: cupFloorY, r: rCup });
 
   // 2. Support shelf + 7.0 mm lateral USB cord pass-through notch at theta = 0
+  //    Offset 0.20 mm below cupFloorY so inner wall vertices inside the notch NEVER coincide
+  //    with the cup floor ring when welded by 3D position in Binary STL (0 non-manifold edges!).
+  const shelfDropY = Math.max(minFloorY - 0.3, cupFloorY - 0.2);
   inner.push({
-    y: cupFloorY,
+    y: shelfDropY,
     r: rBore,
     rFn: (theta) => rWithNotch(theta, rBore),
   });
 
   const floorBotY = Math.max(minFloorY - 0.8, cupFloorY - led.cupFloorThicknessMm);
-  if (floorBotY < cupFloorY - 0.2) {
+  if (floorBotY < shelfDropY - 0.2) {
     inner.push({
       y: floorBotY,
       r: rBore,
@@ -584,7 +587,9 @@ export function buildIndependentBase(
       inner.push({ y: totalH, r: rCup + 0.35 });
       inner.push({ y: totalH - 0.45, r: rCup });
       inner.push({ y: cupFloorY, r: rCup });
-      inner.push({ y: cupFloorY, r: rBore, rFn: (theta) => rWithNotch(theta, rBore) });
+      // Drop 0.20 mm below cupFloorY so vertices inside the 7 mm lateral notch NEVER coincide with
+      // the cupFloorY ring when welded by 3D position in exported Binary STL (0 non-manifold edges!).
+      inner.push({ y: cupFloorY - 0.2, r: rBore, rFn: (theta) => rWithNotch(theta, rBore) });
       // Floor thickness down to rimH (5.5 mm), strictly above 45° gable roof peak (4.9 mm)!
       inner.push({ y: rimH, r: rBore, rFn: (theta) => rWithNotch(theta, rBore) });
       inner.push({ y: cfSlotH, r: rSlotIn, rFn: rSlotFn });

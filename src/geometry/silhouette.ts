@@ -1,4 +1,77 @@
-import { MountType, SculptStroke, SilhouetteParams, SplineControlPoint } from '../types/lamp';
+import {
+  LampConfig,
+  LampSizePreset,
+  MountType,
+  SculptStroke,
+  SilhouetteParams,
+  SplineControlPoint,
+} from '../types/lamp';
+import {
+  BAYONET_DEPTH_MM,
+  COMPACT_FLUSH_LUG_DEPTH_MM,
+  THREAD_DEPTH_MM,
+  couplingUsesBayonet,
+  getEffectiveNeckRadius,
+} from './coupling';
+import { getLedKit001Dimensions } from './mounts/ledKit001';
+import { getSocketE26Dimensions } from './mounts/socketE26';
+
+export const SHADE_SIZE_PRESETS: Record<
+  LampSizePreset,
+  { id: LampSizePreset; label: string; heightMm: number }
+> = {
+  XS: { id: 'XS', label: 'XS', heightMm: 125 },
+  S: { id: 'S', label: 'S', heightMm: 150 },
+  M: { id: 'M', label: 'M', heightMm: 170 },
+  L: { id: 'L', label: 'L', heightMm: 200 },
+  XL: { id: 'XL', label: 'XL', heightMm: 235 },
+};
+
+/** Continuous shade-only scale factor in [0.75, 1.40] (never affects base, socket, or coupling). */
+export function getEffectiveShadeScale(p: SilhouetteParams): number {
+  return clamp(p.shadeScale ?? 1.0, 0.75, 1.4);
+}
+
+/** Effective physical height (mm) of the shade after applying `shadeScale`, clamped to Bambu A1 bounds. */
+export function getEffectiveShadeHeight(p: SilhouetteParams): number {
+  return clamp(p.height * getEffectiveShadeScale(p), 90, 250);
+}
+
+/**
+ * Computes the strict minimum outer base radius (mm) required for the shade to cleanly enclose
+ * the fixed hardware mount / coupling ring (Ø75 compact flush base, Ø59.7 LED Kit 001, Ø40.5 E26/E27,
+ * or bayonet/thread female hub). Guarantees scaling down the shade NEVER crushes the socket!
+ */
+export function getMinSafeShadeBaseRadius(config: LampConfig): number {
+  const { silhouette, base, mount } = config;
+  const wallT = clamp(mount.wallThickness, 1.6, 3.2);
+  const isTwoPart = silhouette.buildMode === 'two_part' && mount.position === 'bottom';
+
+  if (isTwoPart) {
+    const rMaleBase = getEffectiveNeckRadius(config);
+    const isCompactFlush = base.style === 'compact_flush';
+    const extraCoupling = isCompactFlush
+      ? COMPACT_FLUSH_LUG_DEPTH_MM + 0.25
+      : couplingUsesBayonet(base)
+        ? BAYONET_DEPTH_MM + 0.25
+        : base.coupling === 'thread'
+          ? THREAD_DEPTH_MM
+          : 0;
+    const clr =
+      !isCompactFlush && base.coupling === 'gravity_seat'
+        ? Math.max(0.4, base.couplingClearance)
+        : clamp(base.couplingClearance, 0.2, 0.65);
+    const rHubOut = rMaleBase + clr + extraCoupling + Math.max(2.6, wallT + 0.6);
+    return rHubOut + wallT + 1.2;
+  }
+
+  if (mount.type === 'led_kit_001') {
+    const led = getLedKit001Dimensions(mount);
+    return led.cavityRadiusMm + wallT + 2.0;
+  }
+  const e26 = getSocketE26Dimensions(mount);
+  return e26.hubOuterRadiusMm + wallT + 1.5;
+}
 
 function clamp(v: number, min: number, max: number): number {
   return v < min ? min : v > max ? max : v;
@@ -272,12 +345,17 @@ export function evaluateSilhouetteRadius(
   p: SilhouetteParams
 ): number {
   const v = clamp(vRaw, 0, 1);
+  const scale = getEffectiveShadeScale(p);
 
   if (p.type === 'custom_spline' && p.controlPoints && p.controlPoints.length >= 2) {
-    return evaluateMonotoneSpline(v, p.controlPoints);
+    return clamp(evaluateMonotoneSpline(v, p.controlPoints) * scale, 22, 125);
   }
 
-  const { baseRadius, midRadius, topRadius, curvature } = p;
+  const baseRadius = p.baseRadius * scale;
+  const midRadius = p.midRadius * scale;
+  const topRadius = p.topRadius * scale;
+  const { curvature } = p;
+  const effHeight = getEffectiveShadeHeight(p);
 
   if (p.type === 'curve') {
     const c = clamp(curvature, 0.15, 0.85);
@@ -285,19 +363,19 @@ export function evaluateSilhouetteRadius(
       const t = v / c;
       const s = Math.sin(t * Math.PI * 0.5);
       const blend = 0.35 * (t * t * (3 - 2 * t)) + 0.65 * s;
-      return baseRadius + (midRadius - baseRadius) * blend;
+      return clamp(baseRadius + (midRadius - baseRadius) * blend, 22, 125);
     } else {
       const t = (v - c) / (1 - c);
       const s = 1 - Math.cos(t * Math.PI * 0.5);
       const blend = 0.35 * (t * t * (3 - 2 * t)) + 0.65 * s;
-      return midRadius + (topRadius - midRadius) * blend;
+      return clamp(midRadius + (topRadius - midRadius) * blend, 22, 125);
     }
   }
 
   if (p.type === 'stepped') {
     const split = clamp(p.stepHeightRatio, 0.22, 0.6);
     const deltaR = Math.max(0, midRadius - baseRadius);
-    const minTransitionV = clamp((deltaR * 0.95) / Math.max(p.height, 60), 0.06, 0.24);
+    const minTransitionV = clamp((deltaR * 0.95) / Math.max(effHeight, 60), 0.06, 0.24);
     const t0 = clamp(split - minTransitionV * 0.35, 0.08, 0.72);
     const t1 = clamp(t0 + minTransitionV, t0 + 0.05, 0.88);
 
@@ -306,26 +384,26 @@ export function evaluateSilhouetteRadius(
     const upperR = midRadius + (topRadius - midRadius) * upperT;
 
     const blend = smoothstep(t0, t1, v);
-    return lowerR * (1 - blend) + upperR * blend;
+    return clamp(lowerR * (1 - blend) + upperR * blend, 22, 125);
   }
 
   if (p.type === 'conical') {
     const split = clamp(p.stepHeightRatio, 0.25, 0.58);
     const neckR = baseRadius * 0.82;
-    const flareSpan = clamp(((midRadius - neckR) * 0.85) / Math.max(p.height, 80), 0.08, 0.22);
+    const flareSpan = clamp(((midRadius - neckR) * 0.85) / Math.max(effHeight, 80), 0.08, 0.22);
     const tFlareEnd = clamp(split + flareSpan, split + 0.06, 0.78);
 
     if (v <= split) {
       const t = v / split;
-      return baseRadius + (neckR - baseRadius) * t;
+      return clamp(baseRadius + (neckR - baseRadius) * t, 22, 125);
     }
     if (v <= tFlareEnd) {
       const t = smoothstep(split, tFlareEnd, v);
-      return neckR + (midRadius - neckR) * t;
+      return clamp(neckR + (midRadius - neckR) * t, 22, 125);
     }
     const t = (v - tFlareEnd) / Math.max(1 - tFlareEnd, 0.01);
     const curvePower = 0.85 + 0.35 * (1 - curvature);
-    return midRadius + (topRadius - midRadius) * Math.pow(t, curvePower);
+    return clamp(midRadius + (topRadius - midRadius) * Math.pow(t, curvePower), 22, 125);
   }
 
   // 'wavy' — UMINO S011 stacked pillowed rings
@@ -343,7 +421,7 @@ export function evaluateSilhouetteRadius(
   const endFade = smoothstep(0.04, 0.14, v) * (1 - smoothstep(0.93, 1.0, v) * 0.55);
   const phase = v * rings * Math.PI;
   const pillow = Math.pow(Math.abs(Math.sin(phase)), 0.75) * 2.0 - 1.0;
-  return Math.max(20, baseEnv + pillow * (p.wavyDepth * 0.5) * endFade);
+  return clamp(baseEnv + pillow * (p.wavyDepth * scale * 0.5) * endFade, 22, 125);
 }
 
 /**
@@ -392,7 +470,7 @@ export function evaluateEffectiveSilhouetteRadius(
 
   if (p.closeTopDome && !invertedForPendant && isSphereSilhouette(p)) {
     // Exact mathematical sphere: base truncated at y = 0 => yc = 0.78 * R, North Pole at y = yc + R = 1.78 * R
-    const H = Math.max(60, p.height);
+    const H = Math.max(60, getEffectiveShadeHeight(p));
     const R = clamp(H / 1.78, 34, 118);
     const yc = 0.78 * R;
     const rTopTarget = mountType === 'led_kit_001' ? Math.max(2.4, wallT + 1.1) : 8.0 + wallT;

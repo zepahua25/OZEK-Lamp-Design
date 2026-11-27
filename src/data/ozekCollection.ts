@@ -92,7 +92,8 @@ function buildZen02(): LampConfig {
   const cfg = cloneConfig(DEFAULT_CONFIG);
   cfg.family = 'organic';
   cfg.silhouette.type = 'custom_spline';
-  cfg.silhouette.height = 172;
+  cfg.silhouette.height = 170; // M (170 mm) default for organic spheres
+  cfg.silhouette.shadeScale = 1.0;
   cfg.silhouette.controlPoints = SILHOUETTE_SPLINE_TEMPLATES.sphere.points.map((p) => ({ ...p }));
   cfg.silhouette.baseRadius = 44;
   cfg.silhouette.midRadius = 94;

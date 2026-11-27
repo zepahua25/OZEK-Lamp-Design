@@ -1,5 +1,12 @@
 import { LampConfig, LampPreset, LampSizePreset } from '../types/lamp';
-import { SILHOUETTE_SPLINE_TEMPLATES } from '../geometry/silhouette';
+import {
+  SHADE_SIZE_PRESETS,
+  SILHOUETTE_SPLINE_TEMPLATES,
+  getEffectiveShadeHeight,
+  getEffectiveShadeScale,
+  getMinSafeShadeBaseRadius,
+  isSphereSilhouette,
+} from '../geometry/silhouette';
 
 export function cloneConfig(cfg: LampConfig): LampConfig {
   return JSON.parse(JSON.stringify(cfg)) as LampConfig;
@@ -85,66 +92,75 @@ const SHARED_ORGANIC = {
 };
 
 /**
- * Scales total lamp proportions cleanly to S (150 mm) / M (200 mm) / L (250 mm)
- * for Basic Mode while keeping hardware mounts & Bambu Lab A1 (256 mm) bounds intact.
+ * Parametric Shade-Only Size Presets: XS (125) / S (150) / M (170) / L (200) / XL (235 mm).
+ * MECHANICAL GUARANTEE:
+ *  - NEVER modifies `base` (compact flush Ø75 mm, bayonet/thread collar, clearance, height)
+ *  - NEVER modifies `mount` (LED Kit 001 Ø59.7 mm cavity, E26/E27 Ø40.5 mm hole)
+ *  - Scales ONLY the shade body & outer proportions, clamping the lower shade radius above
+ *    `getMinSafeShadeBaseRadius(next)` so the shade NEVER shrinks narrower than the coupling ring!
  */
 export function applySizePreset(current: LampConfig, size: LampSizePreset): LampConfig {
   const next = cloneConfig(current);
-  const targetTotal = size === 'S' ? 150 : size === 'M' ? 200 : 250;
-  const isTwoPart =
-    next.silhouette.buildMode === 'two_part' && next.mount.position === 'bottom';
+  const targetShadeH = SHADE_SIZE_PRESETS[size].heightMm;
+  const currentEffH = getEffectiveShadeHeight(next.silhouette);
+  const currentScale = getEffectiveShadeScale(next.silhouette);
 
-  const currentTotal = isTwoPart
-    ? next.silhouette.height +
-      (next.base.style === 'compact_flush'
-        ? 0
-        : next.base.style === 'conkel'
-          ? 12
-          : next.base.height)
-    : next.silhouette.height;
-  const ratio = Math.max(0.62, Math.min(1.45, targetTotal / Math.max(100, currentTotal)));
-  const radScale = Math.max(0.76, Math.min(1.24, Math.pow(ratio, 0.55)));
+  const ratio = Math.max(0.55, Math.min(1.65, targetShadeH / Math.max(85, currentEffH)));
+  const isSphere = isSphereSilhouette(next.silhouette);
+  // Keep exact spherical ratios on Sphere profiles; use balanced architectural scaling on tall shades
+  const radScale = isSphere
+    ? Math.max(0.62, Math.min(1.45, ratio))
+    : Math.max(0.72, Math.min(1.32, Math.pow(ratio, 0.65)));
 
-  if (isTwoPart) {
-    const basePart =
-      next.base.style === 'compact_flush'
-        ? 15
-        : next.base.style === 'conkel'
-          ? next.mount.type === 'e26_e27'
-            ? 55
-            : 18
-          : Math.round(Math.max(42, Math.min(90, next.base.height * ratio)) / 2) * 2;
-    next.base.height = basePart;
-    const seatContribution =
-      next.base.style === 'compact_flush' ? 0 : next.base.style === 'conkel' ? 12 : basePart;
-    next.silhouette.height = Math.max(
-      95,
-      Math.min(238, Math.round((targetTotal - seatContribution) / 2) * 2)
+  const minSafeBaseR = Math.ceil(getMinSafeShadeBaseRadius(next));
+  const minR = isSphere ? 28 : Math.max(28, minSafeBaseR);
+
+  // Bake current shadeScale cleanly into silhouette parameters and reset continuous slider to 100%
+  const totalRadMult = currentScale * radScale;
+  next.silhouette.height = Math.max(95, Math.min(245, Math.round(targetShadeH)));
+  next.silhouette.shadeScale = 1.0;
+
+  if (isSphere) {
+    // Preserve exact SILHOUETTE_SPLINE_TEMPLATES.sphere symmetry ratios so isSphereSilhouette() stays true
+    const targetMidR = Math.max(
+      Math.max(58, Math.ceil(minSafeBaseR / 0.625)),
+      Math.min(118, Math.round(next.silhouette.midRadius * totalRadMult))
     );
-    if (next.base.style !== 'compact_flush') {
-      next.base.footRadius = Math.max(45, Math.min(78, Math.round(next.base.footRadius * radScale)));
-    }
+    const r04 = Math.max(26, Math.round(targetMidR * (44 / 94)));
+    const r13 = Math.max(44, Math.round(targetMidR * (80 / 94)));
+    next.silhouette.baseRadius = r04;
+    next.silhouette.midRadius = targetMidR;
+    next.silhouette.topRadius = r04;
+    next.silhouette.controlPoints = [
+      { v: 0.0, r: r04 },
+      { v: 0.25, r: r13 },
+      { v: 0.5, r: targetMidR },
+      { v: 0.75, r: r13 },
+      { v: 1.0, r: r04 },
+    ];
   } else {
-    next.silhouette.height = Math.min(248, targetTotal);
-  }
-
-  next.silhouette.baseRadius = Math.max(
-    42,
-    Math.min(112, Math.round(next.silhouette.baseRadius * radScale))
-  );
-  next.silhouette.midRadius = Math.max(
-    44,
-    Math.min(118, Math.round(next.silhouette.midRadius * radScale))
-  );
-  next.silhouette.topRadius = Math.max(
-    28,
-    Math.min(108, Math.round(next.silhouette.topRadius * radScale))
-  );
-  if (next.silhouette.controlPoints?.length) {
-    next.silhouette.controlPoints = next.silhouette.controlPoints.map((pt) => ({
-      v: pt.v,
-      r: Math.max(28, Math.min(118, Math.round(pt.r * radScale))),
-    }));
+    next.silhouette.baseRadius = Math.max(
+      minR,
+      Math.min(114, Math.round(next.silhouette.baseRadius * totalRadMult))
+    );
+    next.silhouette.midRadius = Math.max(
+      minR,
+      Math.min(120, Math.round(next.silhouette.midRadius * totalRadMult))
+    );
+    next.silhouette.topRadius = Math.max(
+      28,
+      Math.min(110, Math.round(next.silhouette.topRadius * totalRadMult))
+    );
+    if (next.silhouette.controlPoints?.length) {
+      const lastIdx = next.silhouette.controlPoints.length - 1;
+      next.silhouette.controlPoints = next.silhouette.controlPoints.map((pt, idx) => {
+        const floorR = idx === 0 ? minR : idx === lastIdx ? 28 : Math.max(30, minR - 6);
+        return {
+          v: pt.v,
+          r: Math.max(floorR, Math.min(120, Math.round(pt.r * totalRadMult))),
+        };
+      });
+    }
   }
 
   return next;

@@ -76,7 +76,11 @@ export function normalizeLampConfig(partial: LampConfig): LampConfig {
   return {
     ...cloneConfig(DEFAULT_CONFIG),
     ...partial,
-    silhouette: { ...DEFAULT_CONFIG.silhouette, ...(partial.silhouette ?? {}) },
+    silhouette: {
+      ...DEFAULT_CONFIG.silhouette,
+      ...(partial.silhouette ?? {}),
+      shadeScale: partial.silhouette?.shadeScale ?? 1.0,
+    },
     base: { ...DEFAULT_CONFIG.base, ...(partial.base ?? {}) },
     mount: { ...DEFAULT_CONFIG.mount, ...(partial.mount ?? {}) },
     pleated: { ...DEFAULT_CONFIG.pleated, ...(partial.pleated ?? {}) },

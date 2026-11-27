@@ -21,6 +21,11 @@ import {
   UiMode,
 } from '../types/lamp';
 import { listLampFamilies } from '../geometry/registry';
+import {
+  SHADE_SIZE_PRESETS,
+  getEffectiveShadeHeight,
+  getEffectiveShadeScale,
+} from '../geometry/silhouette';
 import { MATERIAL_LIST } from '../viewer/materials';
 import { FamilyThumbnail } from './FamilyThumbnail';
 import { StudioSlider } from './controls/StudioSlider';
@@ -173,17 +178,19 @@ export const RightPanel: React.FC<RightPanelProps> = ({
     { id: 'sculpt', label: '5 Esculpir' },
   ];
 
-  // Approximate current total height to highlight closest S / M / L badge
-  const approxTotalH = isTwoPart
-    ? config.silhouette.height +
-      (config.base.style === 'compact_flush'
-        ? 0
-        : config.base.style === 'conkel'
-          ? 12
-          : config.base.height)
-    : config.silhouette.height;
+  // Effective shade height (after continuous 75%-140% scale) to highlight closest XS/S/M/L/XL badge
+  const effShadeH = getEffectiveShadeHeight(config.silhouette);
+  const effShadeScalePct = Math.round(getEffectiveShadeScale(config.silhouette) * 100);
   const activeSize: LampSizePreset =
-    approxTotalH < 175 ? 'S' : approxTotalH < 225 ? 'M' : 'L';
+    effShadeH < 138
+      ? 'XS'
+      : effShadeH < 160
+        ? 'S'
+        : effShadeH < 185
+          ? 'M'
+          : effShadeH < 218
+            ? 'L'
+            : 'XL';
 
   const renderMaterialSwatches = (
     selected: MaterialPresetId,
@@ -309,33 +316,36 @@ export const RightPanel: React.FC<RightPanelProps> = ({
       <div className="flex-1 overflow-y-auto studio-scroll px-4 py-3.5 space-y-3.5">
         {tab === 'shape' && (
           <>
-            {/* Quick S / M / L Size Bar (150 / 200 / 250 mm) */}
-            <div className="space-y-1.5">
+            {/* 5 Quick Shade Sizes (XS 125 / S 150 / M 170 / L 200 / XL 235 mm) + Continuous 75–140% Scale */}
+            <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span
                   className={`text-[12px] font-medium ${
                     isNight ? 'text-zinc-200' : 'text-zinc-700'
                   }`}
                 >
-                  Tamaño rápido
+                  Talla de pantalla
                 </span>
                 <span className={`font-mono-num text-[11px] ${mutedText}`}>
-                  ≈ {Math.round(approxTotalH)} mm total
+                  ≈ {Math.round(effShadeH)} mm pantalla
                 </span>
               </div>
-              <div className="grid grid-cols-3 gap-1.5">
+              <div className="grid grid-cols-5 gap-1">
                 {(
                   [
-                    { id: 'S', label: 'S · 150 mm' },
-                    { id: 'M', label: 'M · 200 mm' },
-                    { id: 'L', label: 'L · 250 mm' },
+                    SHADE_SIZE_PRESETS.XS,
+                    SHADE_SIZE_PRESETS.S,
+                    SHADE_SIZE_PRESETS.M,
+                    SHADE_SIZE_PRESETS.L,
+                    SHADE_SIZE_PRESETS.XL,
                   ] as const
                 ).map((s) => (
                   <button
                     key={s.id}
                     type="button"
                     onClick={() => onApplySizePreset(s.id)}
-                    className={`py-1.5 px-2 rounded-xl text-[11.5px] font-semibold border transition-all ${
+                    title={`${s.label} (${s.heightMm} mm · socket y base fijos)`}
+                    className={`py-1.5 px-1 rounded-xl text-[10.5px] font-semibold border transition-all flex flex-col items-center leading-tight ${
                       activeSize === s.id
                         ? isNight
                           ? 'bg-amber-400 border-amber-400 text-zinc-950'
@@ -345,16 +355,34 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                           : 'bg-zinc-900/[0.03] border-zinc-900/10 text-zinc-700 hover:bg-zinc-900/[0.07]'
                     }`}
                   >
-                    {s.label}
+                    <span>{s.label}</span>
+                    <span className="font-mono-num text-[9px] opacity-75">{s.heightMm}</span>
                   </button>
                 ))}
+              </div>
+              <StudioSlider
+                label="Escala de pantalla"
+                value={effShadeScalePct}
+                defaultValue={100}
+                min={75}
+                max={140}
+                step={1}
+                unit="%"
+                minLabel="75%"
+                maxLabel="140%"
+                dark={isNight}
+                onChange={(pct) => updateSilhouette({ shadeScale: pct / 100 }, true)}
+                onCommit={onCommitGeometry}
+              />
+              <div className={`text-[10px] leading-snug ${mutedText}`}>
+                Encastre y socket fijos: Base Ø 75 mm · LED 001 Ø 59.7 mm · E26/E27 Ø 40.5 mm
               </div>
             </div>
 
             {/* Interactive 2D Draggable Silhouette Spline Editor */}
             <SilhouetteCurveEditor
               points={config.silhouette.controlPoints}
-              heightMm={config.silhouette.height}
+              heightMm={Math.round(effShadeH)}
               dark={isNight}
               onChange={(controlPoints) =>
                 updateSilhouette(

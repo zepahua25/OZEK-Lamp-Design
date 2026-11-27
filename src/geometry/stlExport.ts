@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { STLExporter } from 'three/examples/jsm/exporters/STLExporter.js';
 import { LampConfig, LampMetrics, MeshPartData } from '../types/lamp';
+import { getEffectiveShadeHeight } from './silhouette';
 import { buildZipArchive, ZipEntryInput } from './zipWriter';
 
 export interface StlExportOptions {
@@ -195,7 +196,7 @@ export function generateBambuStudioGuide(
     lines.push('', '--- COLORACIÓN MULTICOLOR BAMBU LAB AMS ---');
     if (config.visual.colorMode === 'stripes') {
       const bands = Math.max(2, (config.visual.stripeRepeats || 2) * 2);
-      const stepMm = config.silhouette.height / bands;
+      const stepMm = getEffectiveShadeHeight(config.silhouette) / bands;
       lines.push(
         `  • Modo Rayas AMS (Z) — PURGA MÍNIMA (${bands} franjas horizontales, cambio cada ≈ ${stepMm.toFixed(1)} mm):`,
         '    En Bambu Studio > Vista previa > deslizador derecho, añade un "Change Filament" en las alturas:',

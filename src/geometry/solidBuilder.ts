@@ -18,6 +18,7 @@ import {
   evaluateEffectiveSilhouetteRadius,
   evaluateSculptField,
   evaluateSilhouetteRadius,
+  getEffectiveShadeHeight,
 } from './silhouette';
 import { getLedKit001Dimensions } from './mounts/ledKit001';
 import { getSocketE26Dimensions } from './mounts/socketE26';
@@ -351,7 +352,7 @@ function appendSculptedFlatSpider(
       normU,
       theta,
       0,
-      silhouette.height,
+      getEffectiveShadeHeight(silhouette),
       minInnerAtBottom,
       deckH + 1.5
     );
@@ -519,7 +520,7 @@ function buildCoupledShade(
 ): SolidMeshBuilder {
   const mb = new SolidMeshBuilder();
   const { silhouette, base, mount } = config;
-  const shadeHeight = silhouette.height;
+  const shadeHeight = getEffectiveShadeHeight(silhouette);
   const wallT = clamp(mount.wallThickness, 1.6, 3.2);
   const evalWall = createWallEvaluator(config, false);
 
@@ -901,7 +902,7 @@ function buildInternalDiffuser(
   const rSeatIn = Math.max(16, rSeatOut - wallT);
 
   const collarClearY = mount.type === 'led_kit_001' ? getCouplingHeightMm(config.base) : 0;
-  const diffHeight = Math.max(50, silhouette.height * 0.86 - collarClearY);
+  const diffHeight = Math.max(50, getEffectiveShadeHeight(silhouette) * 0.86 - collarClearY);
   const yStart = seatY + collarClearY;
   const ySeatStep = yStart + 4.5;
   const yFlareEnd = ySeatStep + Math.abs(rBodyOut - rSeatOut);
@@ -964,7 +965,7 @@ function buildLedKit001Monoblock(
 ): SolidMeshBuilder {
   const mb = new SolidMeshBuilder();
   const { silhouette, mount } = config;
-  const totalHeight = silhouette.height;
+  const totalHeight = getEffectiveShadeHeight(silhouette);
   const wallT = clamp(mount.wallThickness, 1.6, 3.2);
   const evalWall = createWallEvaluator(config, invertedForPendant);
 
@@ -1007,7 +1008,7 @@ function buildLedKit001Monoblock(
   const isClosedPoleMono =
     Boolean(config.silhouette.closeTopDome) &&
     !invertedForPendant &&
-    yMaxLocal >= config.silhouette.height * 0.9;
+    yMaxLocal >= totalHeight * 0.9;
   const monoCapWall = config.family === 'organic' ? 1.2 : wallT;
 
   for (let row = 0; row <= M; row++) {
@@ -1165,7 +1166,7 @@ function buildLedKit001Monoblock(
   } else {
     closeTopRimFlat(mb, N, outRing[M], inRing[M]);
   }
-  if (yMaxLocal >= config.silhouette.height * 0.5) {
+  if (yMaxLocal >= totalHeight * 0.5) {
     getLampFamily(config.family).appendExtraGeometry?.({
       mb,
       config,
@@ -1188,7 +1189,7 @@ function buildE26Monoblock(
 ): SolidMeshBuilder {
   const mb = new SolidMeshBuilder();
   const { silhouette, mount } = config;
-  const totalHeight = silhouette.height;
+  const totalHeight = getEffectiveShadeHeight(silhouette);
   const wallT = clamp(mount.wallThickness, 1.6, 3.2);
   const evalWall = createWallEvaluator(config, invertedForPendant);
 
@@ -1292,7 +1293,7 @@ function buildE26Monoblock(
   }
 
   closeTopRimFlat(mb, N, outRing[M], inRing[M]);
-  if (yMaxLocal >= config.silhouette.height * 0.5) {
+  if (yMaxLocal >= totalHeight * 0.5) {
     getLampFamily(config.family).appendExtraGeometry?.({
       mb,
       config,
@@ -1332,7 +1333,8 @@ export function generateLampGeometry(
   const partStats: Array<ReturnType<typeof finalizePartGeometry>> = [];
 
   if (clipHeightMm !== undefined && clipHeightMm > 0) {
-    const clippedH = Math.min(config.silhouette.height, Math.max(15, clipHeightMm));
+    const effShadeH = getEffectiveShadeHeight(config.silhouette);
+    const clippedH = Math.min(effShadeH, Math.max(15, clipHeightMm));
     const mb =
       config.silhouette.buildMode === 'two_part' && !isPendant && config.base.style !== 'tripod'
         ? buildIndependentBase(config, draft, clippedH)
@@ -1436,11 +1438,12 @@ export function generateLampGeometry(
       partStats.push(diffFin);
     }
   } else {
+    const effShadeH = getEffectiveShadeHeight(config.silhouette);
     const mb =
       config.mount.type === 'led_kit_001'
         ? buildLedKit001Monoblock(
             config,
-            config.silhouette.height,
+            effShadeH,
             radialSegs,
             heightSegs,
             isPendant,
@@ -1448,13 +1451,13 @@ export function generateLampGeometry(
           )
         : buildE26Monoblock(
             config,
-            config.silhouette.height,
+            effShadeH,
             radialSegs,
             heightSegs,
             isPendant
           );
 
-    const raw = mb.buildBuffers(flipY ? config.silhouette.height : undefined);
+    const raw = mb.buildBuffers(flipY ? effShadeH : undefined);
     const fin = finalizePartGeometry(
       raw.positions,
       raw.indices,

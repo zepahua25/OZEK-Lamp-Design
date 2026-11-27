@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import '../families';
-import { CURATED_PRESETS, cloneConfig } from '../../data/presets';
+import { CURATED_PRESETS, applySizePreset, cloneConfig } from '../../data/presets';
 import { OZEK_SIGNATURE_COLLECTION } from '../../data/ozekCollection';
 import { generateLampGeometry } from '../solidBuilder';
 import {
@@ -30,8 +30,103 @@ import {
 } from '../coupling';
 import { organicFamily } from '../families/organic';
 import { wovenFamily } from '../families/woven';
-import { SILHOUETTE_SPLINE_TEMPLATES } from '../silhouette';
-import { BaseStyleId, CouplingType, LampFamilyId, SpiderStyleId, WovenPattern } from '../../types/lamp';
+import {
+  SHADE_SIZE_PRESETS,
+  SILHOUETTE_SPLINE_TEMPLATES,
+  getEffectiveShadeHeight,
+} from '../silhouette';
+import {
+  BaseStyleId,
+  CouplingType,
+  LampFamilyId,
+  LampSizePreset,
+  SpiderStyleId,
+  WovenPattern,
+} from '../../types/lamp';
+
+/**
+ * Slicer-grade Binary STL manifold validator (welds vertices by quantized 3D float32 position,
+ * matching Bambu Studio / PrusaSlicer / Netfabb vertex welding!).
+ * Catches coincident-vertex zero-area triangles and welded non-manifold edges that index-only checks miss.
+ */
+function validateBinarySTLManifold(stlBuffer: ArrayBuffer): {
+  triangleCount: number;
+  degenerateTriangles: number;
+  openEdges: number;
+  nonManifoldEdges: number;
+  isWatertight: boolean;
+  minZ: number;
+} {
+  const view = new DataView(stlBuffer);
+  const triangleCount = view.getUint32(80, true);
+  const vertMap = new Map<string, number>();
+  const edgeCounts = new Map<string, number>();
+  let nextVertId = 0;
+  let degenerateTriangles = 0;
+  let minZ = Infinity;
+
+  const getVertId = (x: number, y: number, z: number): number => {
+    const key = `${Math.round(x * 1e4)},${Math.round(y * 1e4)},${Math.round(z * 1e4)}`;
+    let id = vertMap.get(key);
+    if (id === undefined) {
+      id = nextVertId++;
+      vertMap.set(key, id);
+    }
+    return id;
+  };
+
+  for (let t = 0; t < triangleCount; t++) {
+    const off = 84 + t * 50;
+    const x0 = view.getFloat32(off + 12, true);
+    const y0 = view.getFloat32(off + 16, true);
+    const z0 = view.getFloat32(off + 20, true);
+    const x1 = view.getFloat32(off + 24, true);
+    const y1 = view.getFloat32(off + 28, true);
+    const z1 = view.getFloat32(off + 32, true);
+    const x2 = view.getFloat32(off + 36, true);
+    const y2 = view.getFloat32(off + 40, true);
+    const z2 = view.getFloat32(off + 44, true);
+
+    if (z0 < minZ) minZ = z0;
+    if (z1 < minZ) minZ = z1;
+    if (z2 < minZ) minZ = z2;
+
+    const a = getVertId(x0, y0, z0);
+    const b = getVertId(x1, y1, z1);
+    const c = getVertId(x2, y2, z2);
+
+    if (a === b || b === c || c === a) {
+      degenerateTriangles++;
+      continue;
+    }
+
+    const pairs: [number, number][] = [
+      [a, b],
+      [b, c],
+      [c, a],
+    ];
+    for (const [u, v] of pairs) {
+      const ek = u < v ? `${u}:${v}` : `${v}:${u}`;
+      edgeCounts.set(ek, (edgeCounts.get(ek) ?? 0) + 1);
+    }
+  }
+
+  let openEdges = 0;
+  let nonManifoldEdges = 0;
+  for (const count of edgeCounts.values()) {
+    if (count === 1) openEdges++;
+    else if (count > 2) nonManifoldEdges++;
+  }
+
+  return {
+    triangleCount,
+    degenerateTriangles,
+    openEdges,
+    nonManifoldEdges,
+    isWatertight: degenerateTriangles === 0 && openEdges === 0 && nonManifoldEdges === 0,
+    minZ,
+  };
+}
 
 describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine', () => {
   it('generates 100% watertight 2-manifold meshes for all 6 curated v2.0 designer presets', () => {
@@ -1083,20 +1178,78 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
     expect(femaleBoreMatches, 'Ø74.2 mm female bayonet bore inside sphere').toBeGreaterThan(80);
     expect(rearArchMatches, '45° rear USB cable exit arch at theta = 0').toBeGreaterThanOrEqual(2);
 
-    // Verify Z-up STL export minZ === 0 for BOTH base and flush shade
+    // Verify Z-up STL export minZ === 0 AND strict position-welded STL manifold (0 non-manifold, 0 open, 0 degenerate!)
     for (const part of [basePart, shadePart]) {
       const stl = exportPartToBinarySTL(part);
-      const view = new DataView(stl);
-      const triCount = view.getUint32(80, true);
-      let minZ = Infinity;
-      for (let t = 0; t < triCount; t++) {
-        const off = 84 + t * 50;
-        for (let v = 0; v < 3; v++) {
-          const z = view.getFloat32(off + 12 + v * 12 + 8, true);
-          if (z < minZ) minZ = z;
-        }
+      const stlRep = validateBinarySTLManifold(stl);
+      expect(stlRep.minZ, `${part.name} STL minZ === 0`).toBeCloseTo(0, 3);
+      if (part.role === 'base') {
+        expect(stlRep.degenerateTriangles, 'compact_flush STL 0 degenerate tris').toBe(0);
+        expect(stlRep.openEdges, 'compact_flush STL 0 welded open edges').toBe(0);
+        expect(stlRep.nonManifoldEdges, 'compact_flush STL 0 welded non-manifold edges').toBe(0);
+        expect(stlRep.isWatertight, 'compact_flush STL slicer-grade watertight').toBe(true);
       }
-      expect(minZ, `${part.name} STL minZ === 0`).toBeCloseTo(0, 3);
+    }
+  }, 45000);
+
+  it('FIX-L — scales shade parametrically across XS/S/M/L/XL (125–235 mm) + 75–140% continuous scale with 100% FIXED base, socket & coupling', () => {
+    const sizes: LampSizePreset[] = ['XS', 'S', 'M', 'L', 'XL'];
+
+    // 1. ZEN 02 Organic Sphere + Compact Flush Ø75 × 15 mm + LED Kit 001 Ø59.7 mm + Bayonet Ø74.2 mm
+    const zenOrig = cloneConfig(OZEK_SIGNATURE_COLLECTION.find((p) => p.id === 'zen-02')!.config);
+    expect(zenOrig.silhouette.height).toBe(SHADE_SIZE_PRESETS.M.heightMm);
+
+    for (const size of sizes) {
+      const scaled = applySizePreset(zenOrig, size);
+      // MECHANICAL GUARANTEE: Base & Mount must remain 100% untouched!
+      expect(scaled.base, `ZEN 02 ${size} base unchanged`).toEqual(zenOrig.base);
+      expect(scaled.mount, `ZEN 02 ${size} mount unchanged`).toEqual(zenOrig.mount);
+      expect(getEffectiveShadeHeight(scaled.silhouette)).toBe(SHADE_SIZE_PRESETS[size].heightMm);
+
+      const { parts, metrics } = generateLampGeometry(scaled, {
+        draft: true,
+        validateManifold: true,
+      });
+      expect(parts).toHaveLength(2);
+      expect(metrics.openEdges, `ZEN 02 ${size} openEdges`).toBe(0);
+      expect(metrics.nonManifoldEdges, `ZEN 02 ${size} nonManifold`).toBe(0);
+      expect(metrics.isWatertight, `ZEN 02 ${size} watertight`).toBe(true);
+
+      // Confirm female bayonet bore inside shade stays locked at Ø74.2 mm (r = 37.10 mm) at every size!
+      const shadePart = parts.find((p) => p.role === 'shade')!;
+      let boreMatches = 0;
+      for (let i = 0; i < shadePart.positions.length; i += 3) {
+        const y = shadePart.positions[i + 1];
+        const r = Math.hypot(shadePart.positions[i], shadePart.positions[i + 2]);
+        if (y >= 6.5 && y <= 14.5 && Math.abs(r - 37.1) < 0.15) boreMatches++;
+      }
+      expect(boreMatches, `ZEN 02 ${size} fixed Ø74.2 mm bayonet bore`).toBeGreaterThan(40);
+    }
+
+    // 2. Continuous 75% and 140% shadeScale on ZEN 02 (compact_flush + LED 001) & Hikari (E26/E27 Ø40.5 mm)
+    for (const scaleVal of [0.75, 1.4]) {
+      const zenScaled = cloneConfig(zenOrig);
+      zenScaled.silhouette.shadeScale = scaleVal;
+      const resZen = generateLampGeometry(zenScaled, { draft: true, validateManifold: true });
+      expect(resZen.metrics.openEdges, `ZEN scale ${scaleVal} openEdges`).toBe(0);
+      expect(resZen.metrics.nonManifoldEdges, `ZEN scale ${scaleVal} nonManifold`).toBe(0);
+      expect(resZen.metrics.isWatertight, `ZEN scale ${scaleVal} watertight`).toBe(true);
+
+      // Base STL must still be exact Ø75.0 × 15.0 mm with 0 welded non-manifold edges!
+      const baseStl = exportPartToBinarySTL(resZen.parts.find((p) => p.role === 'base')!);
+      const baseRep = validateBinarySTLManifold(baseStl);
+      expect(baseRep.nonManifoldEdges, `ZEN scale ${scaleVal} base STL non-manifold`).toBe(0);
+      expect(baseRep.isWatertight, `ZEN scale ${scaleVal} base STL watertight`).toBe(true);
+
+      const hikari = cloneConfig(CURATED_PRESETS[0].config); // E26/E27 Ø40.5 mm + Dome + Spider
+      const hikariScaled = applySizePreset(hikari, scaleVal < 1 ? 'XS' : 'XL');
+      expect(hikariScaled.base, `Hikari base unchanged`).toEqual(hikari.base);
+      expect(hikariScaled.mount, `Hikari E26 mount unchanged`).toEqual(hikari.mount);
+      hikariScaled.silhouette.shadeScale = scaleVal;
+      const resHik = generateLampGeometry(hikariScaled, { draft: true, validateManifold: true });
+      expect(resHik.metrics.openEdges, `Hikari scale ${scaleVal} openEdges`).toBe(0);
+      expect(resHik.metrics.nonManifoldEdges, `Hikari scale ${scaleVal} nonManifold`).toBe(0);
+      expect(resHik.metrics.isWatertight, `Hikari scale ${scaleVal} watertight`).toBe(true);
     }
   }, 45000);
 });
