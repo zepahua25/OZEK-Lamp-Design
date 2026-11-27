@@ -17,8 +17,16 @@ import {
   BAYONET_MALE_Y_END,
   BAYONET_MALE_Y_START,
   BAYONET_TWIST_END_DEG,
+  COMPACT_FLUSH_COLLAR_RADIUS_MM,
+  COMPACT_FLUSH_HEIGHT_MM,
+  COMPACT_FLUSH_LUG_Y_END,
+  COMPACT_FLUSH_LUG_Y_START,
+  COMPACT_FLUSH_OUTER_RADIUS_MM,
+  COMPACT_FLUSH_TWIST_Y_HIGH,
+  COMPACT_FLUSH_TWIST_Y_LOW,
   evaluateFemaleCouplingRadius,
   evaluateMaleCouplingOffset,
+  getShadeSeatY,
 } from '../coupling';
 import { organicFamily } from '../families/organic';
 import { wovenFamily } from '../families/woven';
@@ -120,7 +128,14 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
     }
   });
 
-  const baseStyles: BaseStyleId[] = ['dome', 'pedestal', 'cylinder', 'conkel', 'tripod'];
+  const baseStyles: BaseStyleId[] = [
+    'dome',
+    'pedestal',
+    'cylinder',
+    'conkel',
+    'tripod',
+    'compact_flush',
+  ];
   const couplings: CouplingType[] = ['gravity_seat', 'spider', 'thread', 'bayonet', 'friction'];
 
   it('maintains 100% watertight manifold topology across all 5 Base styles (45° vaults & gable cord slot) × 5 Couplings × LED 001 & E26/E27', () => {
@@ -605,15 +620,16 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
     }
   }, 30000);
 
-  it('FIX-F — closes full Sphere/Dome cleanly to R = 0 mm (LED Kit 001, 0 degenerate pole tris) and Ø16 mm vent (E26/E27)', () => {
-    // 1. LED Kit 001 -> exact R = 0 mm closed North Pole without degenerate faces or open edges (ZEN 02 1-Piece Integrated Sphere!)
+  it('FIX-F — closes full Sphere/Dome cleanly to R = 0 mm (LED Kit 001 + Flamas pole closure, 0 degenerate pole tris) and Ø16 mm vent (E26/E27)', () => {
+    // 1. LED Kit 001 -> exact R = 0 mm closed North Pole without degenerate faces or open edges (ZEN 02 2-Piece Flush Sphere!)
     const zen = cloneConfig(OZEK_SIGNATURE_COLLECTION.find((p) => p.id === 'zen-02')!.config);
     expect(zen.silhouette.closeTopDome).toBe(true);
-    expect(zen.silhouette.buildMode).toBe('monoblock');
+    expect(zen.silhouette.buildMode).toBe('two_part');
+    expect(zen.base.style).toBe('compact_flush');
     expect(zen.mount.type).toBe('led_kit_001');
 
     const ledRes = generateLampGeometry(zen, { draft: true, validateManifold: true });
-    expect(ledRes.parts).toHaveLength(1);
+    expect(ledRes.parts).toHaveLength(2);
     expect(ledRes.metrics.openEdges, 'closed sphere LED openEdges').toBe(0);
     expect(ledRes.metrics.nonManifoldEdges, 'closed sphere LED nonManifold').toBe(0);
     expect(ledRes.metrics.isWatertight, 'closed sphere LED watertight').toBe(true);
@@ -626,7 +642,7 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
       if (pos[i] < minY) minY = pos[i];
     }
     // Strictly clipped at Z = 0: zero vertices drop below y = 0!
-    expect(minY, 'no Voronoi ribbon drops below bed y = 0').toBeGreaterThanOrEqual(-1e-4);
+    expect(minY, 'no isocontour ribbon drops below bed y = 0').toBeGreaterThanOrEqual(-1e-4);
 
     // Verify the exact North Pole vertex (x=0, z=0, y ≈ height + 0.35) exists with ZERO degenerate triangles
     const expectedPoleY = zen.silhouette.height + 0.35;
@@ -661,9 +677,31 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
     expect(poleTriCount, 'polar crown fan triangles').toBeGreaterThanOrEqual(48);
     expect(degeneratePoleTris, 'zero degenerate triangles at pole').toBe(0);
 
+    // 1b. Flamas / Ondas on closed LED sphere MUST reach exact central axis R = 0.0 mm (zero bald center circle!)
+    const flamesLed = cloneConfig(zen);
+    flamesLed.organic.mode = 'flames';
+    flamesLed.organic.finCount = 24;
+    const flamesRes = generateLampGeometry(flamesLed, { draft: true, validateManifold: true });
+    expect(flamesRes.metrics.openEdges, 'Flamas closed pole openEdges').toBe(0);
+    expect(flamesRes.metrics.nonManifoldEdges, 'Flamas closed pole nonManifold').toBe(0);
+    expect(flamesRes.metrics.isWatertight, 'Flamas closed pole watertight').toBe(true);
+    const flamesShade = flamesRes.parts.find((p) => p.role === 'shade')!;
+    let flameCenterVerts = 0;
+    for (let i = 0; i < flamesShade.positions.length; i += 3) {
+      const r = Math.hypot(flamesShade.positions[i], flamesShade.positions[i + 2]);
+      const y = flamesShade.positions[i + 1];
+      if (y >= flamesLed.silhouette.height - 1.5 && r < 0.35) {
+        flameCenterVerts++;
+      }
+    }
+    // 24 flame fins converging cleanly to R ≈ 0 at North Pole -> many vertices right at center axis!
+    expect(flameCenterVerts, 'Flamas fins converge at R=0 North Pole').toBeGreaterThan(24);
+
     // 2. E26/E27 (2-Piece) -> discreet Ø16 mm (r ≈ 8.0 mm) top thermal vent hole
     const e26Cfg = cloneConfig(zen);
     e26Cfg.silhouette.buildMode = 'two_part';
+    e26Cfg.base.style = 'cylinder';
+    e26Cfg.base.height = 42;
     e26Cfg.organic.mode = 'flames';
     e26Cfg.mount.type = 'e26_e27';
     const e26Res = generateLampGeometry(e26Cfg, { draft: true, validateManifold: true });
@@ -739,31 +777,79 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
     }
   }, 30000);
 
-  it('FIX-H — validates 3D Differential Curve Growth Gravity Circuits (2/4/6 continuous F1 tracks, 18–24 mm deep, Z >= 0) + Sculpt & AMS guide', () => {
-    for (const strands of [2, 4, 6]) {
+  it('FIX-H — validates 3D Icosphere Isocontour Gravity ribbons (10/16/22 centers, 5–9 levels, 16–24 mm deep, Z >= 0) + Sculpt & AMS guide', () => {
+    for (const centers of [10, 16, 22]) {
       for (const grav of [-9.8, 0, 9.8]) {
-        const cfg = cloneConfig(OZEK_SIGNATURE_COLLECTION[1].config); // ZEN 02 1-Piece Sphere
+        const cfg = cloneConfig(OZEK_SIGNATURE_COLLECTION[1].config); // ZEN 02 Flush 2-Piece Sphere
         cfg.organic.mode = 'gravity';
-        cfg.organic.voronoiCells = strands;
-        cfg.organic.voronoiSoftness = strands === 2 ? 0.45 : 0.85;
+        cfg.organic.voronoiCells = centers;
+        cfg.organic.voronoiSoftness = centers === 10 ? 0.45 : 0.82;
         cfg.organic.voronoiDispersion = 0.5;
         cfg.organic.gravityAccel = grav;
-        cfg.organic.finDepth = 21;
+        cfg.organic.finDepth = 20;
         cfg.organic.finThickness = 1.4;
 
         const res = generateLampGeometry(cfg, { draft: true, validateManifold: true });
-        expect(res.parts).toHaveLength(1);
-        expect(res.metrics.openEdges, `circuits ${strands}s/${grav}g openEdges`).toBe(0);
-        expect(res.metrics.nonManifoldEdges, `circuits ${strands}s/${grav}g nonManifold`).toBe(0);
-        expect(res.metrics.isWatertight, `circuits ${strands}s/${grav}g watertight`).toBe(true);
-        expect(res.metrics.volumeCm3, `circuits ${strands}s/${grav}g volume`).toBeGreaterThan(50);
+        expect(res.parts).toHaveLength(2);
+        expect(res.metrics.openEdges, `isocontours ${centers}c/${grav}g openEdges`).toBe(0);
+        expect(res.metrics.nonManifoldEdges, `isocontours ${centers}c/${grav}g nonManifold`).toBe(0);
+        expect(res.metrics.isWatertight, `isocontours ${centers}c/${grav}g watertight`).toBe(true);
+        expect(res.metrics.volumeCm3, `isocontours ${centers}c/${grav}g volume`).toBeGreaterThan(60);
 
-        const part = res.parts[0];
+        const shadePart = res.parts.find((p) => p.role === 'shade')!;
         let minY = Infinity;
-        for (let i = 1; i < part.positions.length; i += 3) {
-          if (part.positions[i] < minY) minY = part.positions[i];
+        let maxR = 0;
+        for (let i = 0; i < shadePart.positions.length; i += 3) {
+          const y = shadePart.positions[i + 1];
+          const r = Math.hypot(shadePart.positions[i], shadePart.positions[i + 2]);
+          if (y < minY) minY = y;
+          if (r > maxR) maxR = r;
         }
-        expect(minY, `circuits ${strands}s/${grav}g flat bed minY >= 0`).toBeGreaterThanOrEqual(-1e-4);
+        expect(minY, `isocontours ${centers}c/${grav}g flat bed minY >= 0`).toBeGreaterThanOrEqual(-1e-4);
+        expect(maxR, `isocontours ${centers}c/${grav}g ribbons protrude beyond core`).toBeGreaterThan(108);
+
+        // Anti-hole full-sphere coverage metric (default density 16):
+        // Sample 180 uniform Fibonacci points across the visible sphere and confirm NO empty >14 mm hole exists!
+        if (centers === 16) {
+          const sphereR = cfg.silhouette.height / 1.78;
+          const sphereYc = 0.78 * sphereR;
+          const ribbonDirsX: number[] = [];
+          const ribbonDirsY: number[] = [];
+          const ribbonDirsZ: number[] = [];
+          for (let i = 0; i < shadePart.positions.length; i += 3) {
+            const dx = shadePart.positions[i];
+            const dy = shadePart.positions[i + 1] - sphereYc;
+            const dz = shadePart.positions[i + 2];
+            const dist = Math.hypot(dx, dy, dz);
+            if (dist > sphereR + 5.0) {
+              ribbonDirsX.push(dx / dist);
+              ribbonDirsY.push(dy / dist);
+              ribbonDirsZ.push(dz / dist);
+            }
+          }
+          expect(ribbonDirsX.length, `ribbon vertices (${grav}g)`).toBeGreaterThan(800);
+
+          const golden = Math.PI * (3 - Math.sqrt(5));
+          let maxDistToRibbonMm = 0;
+          for (let k = 0; k < 180; k++) {
+            const ny = 1 - (2 * (k + 0.5)) / 180;
+            if (sphereYc + ny * sphereR < 16.0) continue; // above bottom bed rim
+            const sr = Math.sqrt(Math.max(0, 1 - ny * ny));
+            const sx = sr * Math.cos(k * golden);
+            const sz = -sr * Math.sin(k * golden);
+            let bestDot = -1;
+            for (let j = 0; j < ribbonDirsX.length; j += 2) {
+              const d = sx * ribbonDirsX[j] + ny * ribbonDirsY[j] + sz * ribbonDirsZ[j];
+              if (d > bestDot) bestDot = d;
+            }
+            const geoMm = Math.acos(Math.max(-1, Math.min(1, bestDot))) * sphereR;
+            if (geoMm > maxDistToRibbonMm) maxDistToRibbonMm = geoMm;
+          }
+          expect(
+            maxDistToRibbonMm,
+            `anti-hole max distance to nearest ribbon (${grav}g) <= 14 mm`
+          ).toBeLessThan(14.0);
+        }
       }
     }
 
@@ -771,7 +857,7 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
     const cfg = cloneConfig(OZEK_SIGNATURE_COLLECTION[1].config);
     cfg.silhouette.buildMode = 'two_part';
     cfg.organic.mode = 'gravity';
-    cfg.organic.voronoiCells = 4;
+    cfg.organic.voronoiCells = 16;
     cfg.organic.gravityAccel = -9.8;
     cfg.visual.colorMode = 'stripes';
     cfg.visual.stripeRepeats = 3;
@@ -783,9 +869,9 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
 
     const resTwoPart = generateLampGeometry(cfg, { draft: true, validateManifold: true });
     expect(resTwoPart.parts).toHaveLength(2);
-    expect(resTwoPart.metrics.openEdges, '2-part Voronoi + sculpt openEdges').toBe(0);
-    expect(resTwoPart.metrics.nonManifoldEdges, '2-part Voronoi + sculpt nonManifold').toBe(0);
-    expect(resTwoPart.metrics.isWatertight, '2-part Voronoi + sculpt watertight').toBe(true);
+    expect(resTwoPart.metrics.openEdges, '2-part Isocontours + sculpt openEdges').toBe(0);
+    expect(resTwoPart.metrics.nonManifoldEdges, '2-part Isocontours + sculpt nonManifold').toBe(0);
+    expect(resTwoPart.metrics.isWatertight, '2-part Isocontours + sculpt watertight').toBe(true);
 
     const shadePart = resTwoPart.parts.find((p) => p.role === 'shade')!;
     const stl = exportPartToBinarySTL(shadePart);
@@ -799,7 +885,7 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
         if (z < minZ) minZ = z;
       }
     }
-    expect(minZ, 'Voronoi shade STL minZ === 0').toBeCloseTo(0, 3);
+    expect(minZ, 'Isocontour shade STL minZ === 0').toBeCloseTo(0, 3);
 
     const guide = generateBambuStudioGuide(cfg, resTwoPart.metrics, [
       'ZEN_Base.stl',
@@ -808,11 +894,12 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
     expect(guide).toContain('COLORACIÓN MULTICOLOR BAMBU LAB AMS');
     expect(guide).toContain('PURGA MÍNIMA');
     expect(guide).toContain('Esfera Cerrada (R = 0 mm)');
+    expect(guide).toContain('Base Compacta / Al ras');
   }, 45000);
 
   it('FIX-I — validates Organic Growth ("Crecimiento") dense carnation ruffled fins (24–48 fins, 18–28 mm deep, vEnd = 0.999 closed pole R = 0)', () => {
     for (const finCount of [24, 32, 48]) {
-      const cfg = cloneConfig(OZEK_SIGNATURE_COLLECTION[1].config); // 1-Piece Closed Sphere LED Kit 001
+      const cfg = cloneConfig(OZEK_SIGNATURE_COLLECTION[1].config); // Flush Closed Sphere LED Kit 001
       cfg.organic.mode = 'growth';
       cfg.organic.growthFinCount = finCount;
       cfg.organic.growthAmp = finCount === 24 ? 0.5 : 0.88;
@@ -821,13 +908,13 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
       cfg.organic.finThickness = 1.4;
 
       const res = generateLampGeometry(cfg, { draft: true, validateManifold: true });
-      expect(res.parts).toHaveLength(1);
+      expect(res.parts).toHaveLength(2);
       expect(res.metrics.openEdges, `growth ${finCount}f openEdges`).toBe(0);
       expect(res.metrics.nonManifoldEdges, `growth ${finCount}f nonManifold`).toBe(0);
       expect(res.metrics.isWatertight, `growth ${finCount}f watertight`).toBe(true);
       expect(res.metrics.volumeCm3, `growth ${finCount}f volume`).toBeGreaterThan(55);
 
-      const part = res.parts[0];
+      const part = res.parts.find((p) => p.role === 'shade')!;
       let minY = Infinity;
       let maxY = -Infinity;
       let hasPolarApex = false;
@@ -863,7 +950,7 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
 
   it('FIX-J — validates Organic Wind ("Viento") 45–75 thin fins across Brisa / Ráfagas / Remolino (Z >= 0, closed sphere R = 0)', () => {
     for (const windType of ['breeze', 'gusts', 'vortex'] as const) {
-      const cfg = cloneConfig(OZEK_SIGNATURE_COLLECTION[1].config); // 1-Piece Closed Sphere LED Kit 001
+      const cfg = cloneConfig(OZEK_SIGNATURE_COLLECTION[1].config); // Flush Closed Sphere LED Kit 001
       cfg.organic.mode = 'wind';
       cfg.organic.windType = windType;
       cfg.organic.windFinCount = windType === 'vortex' ? 68 : 54;
@@ -873,13 +960,13 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
       cfg.organic.finThickness = 1.2;
 
       const res = generateLampGeometry(cfg, { draft: true, validateManifold: true });
-      expect(res.parts).toHaveLength(1);
+      expect(res.parts).toHaveLength(2);
       expect(res.metrics.openEdges, `wind ${windType} openEdges`).toBe(0);
       expect(res.metrics.nonManifoldEdges, `wind ${windType} nonManifold`).toBe(0);
       expect(res.metrics.isWatertight, `wind ${windType} watertight`).toBe(true);
       expect(res.metrics.volumeCm3, `wind ${windType} volume`).toBeGreaterThan(55);
 
-      const part = res.parts[0];
+      const part = res.parts.find((p) => p.role === 'shade')!;
       let minY = Infinity;
       let hasPolarApex = false;
       for (let i = 0; i < part.positions.length; i += 3) {
@@ -908,6 +995,108 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
         }
         expect(minZ, 'wind vortex STL minZ === 0').toBeCloseTo(0, 3);
       }
+    }
+  }, 45000);
+
+  it('FIX-K — validates Compact Flush Base (Ø 75.0 × 15.0 mm) + Exact Embedded Female Bayonet Socket (Ø 74.2 mm, seatY = 0, Z = 0)', () => {
+    const zen = cloneConfig(OZEK_SIGNATURE_COLLECTION.find((p) => p.id === 'zen-02')!.config);
+    expect(zen.base.style).toBe('compact_flush');
+    expect(getShadeSeatY(zen)).toBe(0);
+
+    // 1. Vertical clearance & full 0..38° bayonet twist radial clearance verification
+    expect(COMPACT_FLUSH_LUG_Y_START - COMPACT_FLUSH_TWIST_Y_LOW).toBeGreaterThanOrEqual(0.4);
+    expect(COMPACT_FLUSH_TWIST_Y_HIGH - COMPACT_FLUSH_LUG_Y_END).toBeGreaterThanOrEqual(0.4);
+    for (let deg = 0; deg <= BAYONET_TWIST_END_DEG - 1.5; deg += 2) {
+      const twistRad = Math.PI / 3 + (deg * Math.PI) / 180;
+      const inDetentZone = Math.abs(deg - 31) < 5;
+      for (let y = 5.6; y <= 14.8; y += 0.25) {
+        const rMale =
+          COMPACT_FLUSH_COLLAR_RADIUS_MM +
+          evaluateMaleCouplingOffset(Math.PI / 3, y, zen.base);
+        const rFemale = evaluateFemaleCouplingRadius(
+          COMPACT_FLUSH_COLLAR_RADIUS_MM,
+          twistRad,
+          y,
+          zen.base
+        );
+        if (inDetentZone) {
+          expect(rFemale - rMale, `compact_flush detent at deg=${deg}, y=${y}`).toBeGreaterThan(-0.3);
+        } else {
+          expect(rFemale - rMale, `compact_flush clearance at deg=${deg}, y=${y}`).toBeGreaterThan(0.05);
+        }
+      }
+    }
+
+    // 2. Full high-res watertight mesh verification of both parts (Base + Flush Sphere Shade)
+    const { parts, metrics } = generateLampGeometry(zen, {
+      draft: false,
+      validateManifold: true,
+    });
+    expect(parts).toHaveLength(2);
+    expect(metrics.openEdges, 'compact_flush openEdges').toBe(0);
+    expect(metrics.nonManifoldEdges, 'compact_flush nonManifoldEdges').toBe(0);
+    expect(metrics.isWatertight, 'compact_flush watertight').toBe(true);
+
+    const basePart = parts.find((p) => p.role === 'base')!;
+    const shadePart = parts.find((p) => p.role === 'shade')!;
+
+    // Verify exact Base dimensions: height = 15.0 mm, lower outer rim Ø 75.0 mm (r = 37.5 mm), upper cup Ø 59.7 mm
+    let baseMinY = Infinity;
+    let baseMaxY = -Infinity;
+    let rimMaxR = 0;
+    let collarMaxR = 0;
+    let cupMatches = 0;
+    for (let i = 0; i < basePart.positions.length; i += 3) {
+      const x = basePart.positions[i];
+      const y = basePart.positions[i + 1];
+      const z = basePart.positions[i + 2];
+      const r = Math.hypot(x, z);
+      if (y < baseMinY) baseMinY = y;
+      if (y > baseMaxY) baseMaxY = y;
+      if (y <= 5.51 && r > rimMaxR) rimMaxR = r;
+      if (y >= 7.0 && y <= 12.5 && r > collarMaxR) collarMaxR = r;
+      if (y >= 6.4 && y <= 14.6 && Math.abs(r - 29.85) < 0.25) cupMatches++;
+    }
+    expect(baseMinY, 'base rests flat on y=0').toBeCloseTo(0, 3);
+    expect(baseMaxY, 'base exact height = 15.0 mm').toBeCloseTo(COMPACT_FLUSH_HEIGHT_MM, 2);
+    expect(rimMaxR * 2, 'base outer rim diameter = 75.0 mm').toBeCloseTo(
+      COMPACT_FLUSH_OUTER_RADIUS_MM * 2,
+      1
+    );
+    expect(collarMaxR, '3 bayonet lugs protrude 1.5 mm beyond Ø73.5 mm').toBeCloseTo(38.25, 1);
+    expect(cupMatches, 'Ø59.7 x 8.5 mm LED Kit 001 cup').toBeGreaterThan(80);
+
+    // Verify Flush Shade sits flat on Z = 0, has Ø74.2 mm (r = 37.10 mm) female bore & rear 45° USB exit arch
+    let shadeMinY = Infinity;
+    let femaleBoreMatches = 0;
+    let rearArchMatches = 0;
+    for (let i = 0; i < shadePart.positions.length; i += 3) {
+      const x = shadePart.positions[i];
+      const y = shadePart.positions[i + 1];
+      const z = shadePart.positions[i + 2];
+      const r = Math.hypot(x, z);
+      if (y < shadeMinY) shadeMinY = y;
+      if (y >= 6.5 && y <= 14.5 && Math.abs(r - 37.1) < 0.15) femaleBoreMatches++;
+      if (x > 37.0 && Math.abs(z) < 1.5 && y > 3.5 && y < 4.8) rearArchMatches++;
+    }
+    expect(shadeMinY, 'flush sphere shade sits at y = 0').toBeCloseTo(0, 3);
+    expect(femaleBoreMatches, 'Ø74.2 mm female bayonet bore inside sphere').toBeGreaterThan(80);
+    expect(rearArchMatches, '45° rear USB cable exit arch at theta = 0').toBeGreaterThanOrEqual(2);
+
+    // Verify Z-up STL export minZ === 0 for BOTH base and flush shade
+    for (const part of [basePart, shadePart]) {
+      const stl = exportPartToBinarySTL(part);
+      const view = new DataView(stl);
+      const triCount = view.getUint32(80, true);
+      let minZ = Infinity;
+      for (let t = 0; t < triCount; t++) {
+        const off = 84 + t * 50;
+        for (let v = 0; v < 3; v++) {
+          const z = view.getFloat32(off + 12 + v * 12 + 8, true);
+          if (z < minZ) minZ = z;
+        }
+      }
+      expect(minZ, `${part.name} STL minZ === 0`).toBeCloseTo(0, 3);
     }
   }, 45000);
 });

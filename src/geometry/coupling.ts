@@ -8,6 +8,23 @@ export const THREAD_DEPTH_MM = 1.4;
 export const BAYONET_DEPTH_MM = 1.8;
 
 /**
+ * Compact Flush LED Kit 001 Housing ("Compacta / Al ras"):
+ *  - Outer base rim Ø 75.0 mm (r = 37.50 mm) × 15.0 mm total height, flush with Z = 0
+ *  - Lower rim y ∈ [0, 5.5], upper bayonet collar Ø 73.5 mm (r = 36.75 mm) y ∈ [5.5, 15.0]
+ *  - 3 locking lugs protruding 1.5 mm radially at 60°, 180°, 300° (clear of rear USB slot at 0°)
+ *  - Shade sits at seatY = 0 (100% flush on the table) with female bore Ø 74.2 mm (+0.35 mm radial clearance)
+ */
+export const COMPACT_FLUSH_HEIGHT_MM = 15.0;
+export const COMPACT_FLUSH_OUTER_RADIUS_MM = 37.5;
+export const COMPACT_FLUSH_RIM_HEIGHT_MM = 5.5;
+export const COMPACT_FLUSH_COLLAR_RADIUS_MM = 36.75;
+export const COMPACT_FLUSH_LUG_DEPTH_MM = 1.5;
+export const COMPACT_FLUSH_LUG_Y_START = 7.3;
+export const COMPACT_FLUSH_LUG_Y_END = 12.3;
+export const COMPACT_FLUSH_TWIST_Y_LOW = 6.1;
+export const COMPACT_FLUSH_TWIST_Y_HIGH = 13.8;
+
+/**
  * Bayonet vertical geometry constants (mm, localY from collar bottom = 0):
  *  - Male lug lives strictly inside y ∈ [2.2, 7.2] (45° print chamfer up 2.2..3.6, plateau 3.6..6.4, down 6.4..7.2)
  *  - Female twist channel opens generously across y ∈ [1.2, 8.6] (full depth from 2.0..7.6)
@@ -28,13 +45,18 @@ function smoothstep(e0: number, e1: number, x: number): number {
   return t * t * (3 - 2 * t);
 }
 
-/** Whether the current coupling uses bayonet locking lugs (either direct Bayonet or Spider+Bayonet). */
+/** Whether the current coupling uses bayonet locking lugs (Compact Flush, direct Bayonet, or Spider+Bayonet). */
 export function couplingUsesBayonet(base: BaseParams): boolean {
-  return base.coupling === 'bayonet' || (base.coupling === 'spider' && base.spiderBayonet);
+  return (
+    base.style === 'compact_flush' ||
+    base.coupling === 'bayonet' ||
+    (base.coupling === 'spider' && base.spiderBayonet)
+  );
 }
 
 /** Active vertical engagement height of the Base-to-Shade coupling collar. */
 export function getCouplingHeightMm(base: BaseParams): number {
+  if (base.style === 'compact_flush') return COMPACT_FLUSH_HEIGHT_MM;
   return base.coupling === 'gravity_seat' ? GRAVITY_STEP_HEIGHT_MM : COUPLING_HEIGHT_MM;
 }
 
@@ -44,6 +66,9 @@ export function getCouplingHeightMm(base: BaseParams): number {
  */
 export function getEffectiveNeckRadius(config: LampConfig): number {
   const { mount, base } = config;
+  if (base.style === 'compact_flush') {
+    return COMPACT_FLUSH_COLLAR_RADIUS_MM;
+  }
   if (mount.type === 'led_kit_001') {
     const led = getLedKit001Dimensions(mount);
     // Upper LED Kit 001 cup sits right at the top of the base collar -> ensure solid >= 2.6 mm collar wall
@@ -58,9 +83,14 @@ export function getEffectiveNeckRadius(config: LampConfig): number {
 
 /**
  * Computes the height (mm) at which the Shade's seating reference rests on top of the Base.
+ * For 'compact_flush', the shade rests 100% flush on the table (seatY = 0) and the 15 mm base
+ * locks into the embedded female bayonet socket inside the sphere's bottom opening.
  */
 export function getShadeSeatY(config: LampConfig): number {
   const { base, mount } = config;
+  if (base.style === 'compact_flush') {
+    return 0;
+  }
   if (base.style === 'conkel') {
     return mount.type === 'led_kit_001' ? 11.2 : 8.0;
   }
@@ -90,6 +120,22 @@ export function evaluateMaleCouplingOffset(
 ): number {
   const couplingH = getCouplingHeightMm(base);
   const y = clamp(localY, 0, couplingH);
+
+  if (base.style === 'compact_flush') {
+    // 3 locking lugs protruding 1.5 mm radially at 60°, 180°, 300° (clear of rear USB cord slot at 0°)
+    const lugs = 3;
+    const period = (2 * Math.PI) / lugs;
+    const shifted = theta - Math.PI / 3;
+    const normTheta = ((shifted % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+    const localAng = ((normTheta + period * 0.5) % period) - period * 0.5;
+    const halfLug = (10.5 * Math.PI) / 180;
+    const angMask = 1 - smoothstep(halfLug - 0.025, halfLug + 0.025, Math.abs(localAng));
+    // 45° support-free bottom ramp (7.3..8.8), plateau (8.8..11.5), clean top taper (11.5..12.3)
+    const vRampUp = smoothstep(COMPACT_FLUSH_LUG_Y_START, 8.8, y);
+    const vRampDown = 1 - smoothstep(11.5, COMPACT_FLUSH_LUG_Y_END, y);
+    const topChamfer = y > 13.5 ? -0.3 * smoothstep(13.5, COMPACT_FLUSH_HEIGHT_MM, y) : 0;
+    return COMPACT_FLUSH_LUG_DEPTH_MM * angMask * vRampUp * vRampDown + topChamfer;
+  }
 
   if (base.coupling === 'thread') {
     const pitch = clamp(base.threadPitch, 3.2, 5.5);
@@ -135,9 +181,50 @@ export function evaluateFemaleCouplingRadius(
   const couplingH = getCouplingHeightMm(base);
   const y = clamp(localY, 0, couplingH);
   const clr =
-    base.coupling === 'gravity_seat'
+    base.coupling === 'gravity_seat' && base.style !== 'compact_flush'
       ? Math.max(0.4, clamp(base.couplingClearance, 0.2, 0.65))
-      : clamp(base.couplingClearance, 0.15, 0.65);
+      : clamp(base.couplingClearance, 0.2, 0.65);
+
+  if (base.style === 'compact_flush') {
+    // Upper bore Ø 73.5 + 2*0.35 = Ø 74.2 mm (r = 37.10 mm) with 3 aligned bayonet twist channels (+1.5 + 0.25 mm)
+    // Lower counterbore (y ∈ [0, 5.5]) widens at 45° to Ø 75.0 + 2*0.35 = Ø 75.7 mm (r = 37.85 mm) for flush rim
+    const lugs = 3;
+    const period = (2 * Math.PI) / lugs;
+    const shifted = theta - Math.PI / 3;
+    const normTheta = ((shifted % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+    const localAng = ((normTheta + period * 0.5) % period) - period * 0.5;
+
+    const rimStepExtra =
+      (COMPACT_FLUSH_OUTER_RADIUS_MM - COMPACT_FLUSH_COLLAR_RADIUS_MM) *
+      (1 - smoothstep(5.4, 6.2, y));
+
+    // 1. Vertical entry keyway from y = 0 .. 13.7 (±13.5° centered on 60°, 180°, 300°)
+    const halfKey = (13.5 * Math.PI) / 180;
+    const inKeywayAng = 1 - smoothstep(halfKey - 0.025, halfKey + 0.025, Math.abs(localAng));
+    const inKeywayY = 1 - smoothstep(12.9, 13.7, y);
+    const keywayMask = inKeywayAng * inKeywayY;
+
+    // 2. Horizontal twist channel (0..38° + half lug margin) with >= 0.4 mm vertical clearance above & below male lug
+    const twistStart = -halfKey * 0.5;
+    const twistEnd = ((BAYONET_TWIST_END_DEG + 11.5) * Math.PI) / 180;
+    const inTwistAng =
+      smoothstep(twistStart - 0.025, twistStart + 0.025, localAng) *
+      (1 - smoothstep(twistEnd - 0.025, twistEnd + 0.025, localAng));
+    const inTwistY =
+      smoothstep(COMPACT_FLUSH_TWIST_Y_LOW, 6.9, y) *
+      (1 - smoothstep(12.8, COMPACT_FLUSH_TWIST_Y_HIGH, y));
+    const twistMask = inTwistAng * inTwistY;
+
+    // 3. Subtle tactile snap detent ridge at 31° before locked 38° stop pocket
+    const detentCenter = (31 * Math.PI) / 180;
+    const detentHalf = (2.2 * Math.PI) / 180;
+    const detentAng = 1 - smoothstep(0, detentHalf, Math.abs(localAng - detentCenter));
+    const detentBumpMm = 0.25 * detentAng * twistMask;
+
+    const grooveDepth =
+      Math.max(keywayMask, twistMask) * (COMPACT_FLUSH_LUG_DEPTH_MM + 0.25) - detentBumpMm;
+    return rMaleBase + clr + Math.max(rimStepExtra, Math.max(0, grooveDepth));
+  }
 
   if (base.coupling === 'thread') {
     const maleOff = evaluateMaleCouplingOffset(theta, y, base);

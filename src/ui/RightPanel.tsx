@@ -175,7 +175,12 @@ export const RightPanel: React.FC<RightPanelProps> = ({
 
   // Approximate current total height to highlight closest S / M / L badge
   const approxTotalH = isTwoPart
-    ? config.silhouette.height + (config.base.style === 'conkel' ? 12 : config.base.height)
+    ? config.silhouette.height +
+      (config.base.style === 'compact_flush'
+        ? 0
+        : config.base.style === 'conkel'
+          ? 12
+          : config.base.height)
     : config.silhouette.height;
   const activeSize: LampSizePreset =
     approxTotalH < 175 ? 'S' : approxTotalH < 225 ? 'M' : 'L';
@@ -1240,11 +1245,12 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                 ]}
                 onChange={(mode) => {
                   if (mode === 'gravity') {
-                    const depth = clampNum(config.organic.finDepth ?? 21, 18, 24);
-                    const thick = clampNum(config.organic.finThickness ?? 1.4, 1.3, 1.6);
-                    const strands = clampNum(config.organic.voronoiCells ?? 4, 2, 8);
+                    const depth = clampNum(config.organic.finDepth ?? 20, 16, 24);
+                    const thick = clampNum(config.organic.finThickness ?? 1.4, 1.2, 1.6);
+                    const rawCenters = config.organic.voronoiCells ?? 16;
+                    const centers = clampNum(rawCenters < 10 ? 16 : rawCenters, 10, 22);
                     updateOrganic(
-                      { mode, finDepth: depth, depth, finThickness: thick, voronoiCells: strands },
+                      { mode, finDepth: depth, depth, finThickness: thick, voronoiCells: centers },
                       false
                     );
                   } else {
@@ -1309,14 +1315,24 @@ export const RightPanel: React.FC<RightPanelProps> = ({
             {config.organic.mode === 'gravity' && (
               <>
                 <StudioSlider
-                  label="Trazos / Hilos (Circuitos continuos)"
-                  value={clampNum(config.organic.voronoiCells ?? 4, 2, 8)}
-                  defaultValue={4}
-                  min={2}
-                  max={8}
+                  label="Densidad de cintas"
+                  value={clampNum(
+                    (config.organic.voronoiCells ?? 16) < 10
+                      ? 16
+                      : (config.organic.voronoiCells ?? 16),
+                    10,
+                    22
+                  )}
+                  defaultValue={16}
+                  min={10}
+                  max={22}
                   step={1}
-                  minLabel="2 (largos)"
-                  maxLabel="8 (múltiples)"
+                  formatValue={(v) => {
+                    const pitch = 9.8 - ((v - 10) / 12) * 4.8;
+                    return `${v} (~${pitch.toFixed(1)} mm)`;
+                  }}
+                  minLabel="Abiertas (~9.8 mm)"
+                  maxLabel="Tupidas (~5.0 mm)"
                   dark={isNight}
                   onChange={(voronoiCells) => updateOrganic({ voronoiCells }, true)}
                   onCommit={onCommitGeometry}
@@ -1333,9 +1349,9 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                   }`}
                 >
                   <div>
-                    <div className="text-[12px] font-semibold">Colorear cada trazo</div>
+                    <div className="text-[12px] font-semibold">Colorear cada nivel</div>
                     <div className={`text-[10.5px] ${mutedText}`}>
-                      Paleta OZEK por circuito en visor 3D
+                      Paleta OZEK por isocontorno en visor 3D
                     </div>
                   </div>
                   <input
@@ -1539,7 +1555,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
               value={clampNum(
                 config.organic.finDepth ?? config.organic.depth,
                 config.organic.mode === 'gravity'
-                  ? 18
+                  ? 16
                   : config.organic.mode === 'growth'
                     ? 18
                     : config.organic.mode === 'wind'
@@ -1555,7 +1571,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
               )}
               defaultValue={
                 config.organic.mode === 'gravity'
-                  ? 21.0
+                  ? 20.0
                   : config.organic.mode === 'growth'
                     ? 22.0
                     : config.organic.mode === 'wind'
@@ -1564,7 +1580,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
               }
               min={
                 config.organic.mode === 'gravity'
-                  ? 18.0
+                  ? 16.0
                   : config.organic.mode === 'growth'
                     ? 18.0
                     : config.organic.mode === 'wind'
@@ -1596,11 +1612,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
               }
               value={clampNum(
                 config.organic.finThickness ?? (config.organic.mode === 'wind' ? 1.2 : 1.4),
-                config.organic.mode === 'wind'
-                  ? 1.0
-                  : config.organic.mode === 'gravity'
-                    ? 1.3
-                    : 1.2,
+                config.organic.mode === 'wind' ? 1.0 : 1.2,
                 config.organic.mode === 'wind'
                   ? 1.4
                   : config.organic.mode === 'gravity'
@@ -1610,13 +1622,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                       : 2.2
               )}
               defaultValue={config.organic.mode === 'wind' ? 1.2 : 1.4}
-              min={
-                config.organic.mode === 'wind'
-                  ? 1.0
-                  : config.organic.mode === 'gravity'
-                    ? 1.3
-                    : 1.2
-              }
+              min={config.organic.mode === 'wind' ? 1.0 : 1.2}
               max={
                 config.organic.mode === 'wind'
                   ? 1.4
@@ -1687,10 +1693,33 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                     value={config.base.style}
                     dark={isNight}
                     options={[
-                      { value: 'conkel', label: 'Conkel (Flowalistik)' },
-                      { value: 'tripod', label: 'Trípode (auto-180°)' },
+                      { value: 'compact_flush', label: 'Compacta / Al ras (15 mm)' },
+                      { value: 'conkel', label: 'Conkel' },
+                      { value: 'tripod', label: 'Trípode' },
                     ]}
                     onChange={(style) => {
+                      if (style === 'compact_flush') {
+                        onChangeGeometry(
+                          (prev) => ({
+                            ...prev,
+                            mount: { ...prev.mount, type: 'led_kit_001' },
+                            base: {
+                              ...prev.base,
+                              style: 'compact_flush',
+                              finish: 'smooth',
+                              height: 15,
+                              footRadius: 37.5,
+                              coupling: 'bayonet',
+                              bayonetLugs: 3,
+                              couplingClearance: 0.35,
+                              signatureGrooves: false,
+                              collarRevealMm: 0,
+                            },
+                          }),
+                          false
+                        );
+                        return;
+                      }
                       const defaultH =
                         style === 'conkel'
                           ? config.mount.type === 'e26_e27'
@@ -1702,7 +1731,26 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                   />
                 </div>
 
-                {config.base.style !== 'tripod' && (
+                {config.base.style === 'compact_flush' && (
+                  <div
+                    className={`px-3 py-2.5 rounded-xl border text-[11px] space-y-1 ${
+                      isNight
+                        ? 'bg-emerald-500/10 border-emerald-400/35 text-emerald-100'
+                        : 'bg-emerald-50/80 border-emerald-300/80 text-emerald-950'
+                    }`}
+                  >
+                    <div className="font-semibold">
+                      Carcasa Empotrada Al Ras · Ø 75.0 × 15.0 mm
+                    </div>
+                    <div className="opacity-80 leading-snug">
+                      Copa LED Kit 001 (Ø {(59.5 + config.mount.ledTolerance).toFixed(1)} × 8.5 mm) ·
+                      Bayoneta de 3 pestañas (Ø 73.5 → Ø {(73.5 + 2 * config.base.couplingClearance).toFixed(1)} mm) ·
+                      La pantalla descansa al ras en Z = 0 con paso trasero de cable a 45°.
+                    </div>
+                  </div>
+                )}
+
+                {config.base.style !== 'tripod' && config.base.style !== 'compact_flush' && (
                   <>
                     <SegmentedControl
                       label="Acabado de la base"
@@ -1758,7 +1806,8 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                   </>
                 )}
 
-                <div className={`pt-2 border-t ${divider} space-y-2`}>
+                {config.base.style !== 'compact_flush' && (
+                  <div className={`pt-2 border-t ${divider} space-y-2`}>
                   <div
                     className={`text-[12.5px] font-medium tracking-[-0.01em] ${
                       isNight ? 'text-zinc-200' : 'text-zinc-700'
@@ -1907,33 +1956,38 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                     </div>
                   )}
                 </div>
+                )}
 
                 {isExpert && (
                   <div className={`pt-2 border-t ${divider} space-y-3`}>
-                    <StudioSlider
-                      label="Altura de base"
-                      value={config.base.height}
-                      defaultValue={defaultForFamily.base.height}
-                      min={config.base.style === 'conkel' ? 16 : 40}
-                      max={110}
-                      step={2}
-                      unit="mm"
-                      dark={isNight}
-                      onChange={(height) => updateBase({ height }, true)}
-                      onCommit={onCommitGeometry}
-                    />
-                    <StudioSlider
-                      label="Diámetro de base"
-                      value={config.base.footRadius * 2}
-                      defaultValue={defaultForFamily.base.footRadius * 2}
-                      min={90}
-                      max={160}
-                      step={2}
-                      unit="mm"
-                      dark={isNight}
-                      onChange={(dia) => updateBase({ footRadius: dia * 0.5 }, true)}
-                      onCommit={onCommitGeometry}
-                    />
+                    {config.base.style !== 'compact_flush' && (
+                      <>
+                        <StudioSlider
+                          label="Altura de base"
+                          value={config.base.height}
+                          defaultValue={defaultForFamily.base.height}
+                          min={config.base.style === 'conkel' ? 16 : 40}
+                          max={110}
+                          step={2}
+                          unit="mm"
+                          dark={isNight}
+                          onChange={(height) => updateBase({ height }, true)}
+                          onCommit={onCommitGeometry}
+                        />
+                        <StudioSlider
+                          label="Diámetro de base"
+                          value={config.base.footRadius * 2}
+                          defaultValue={defaultForFamily.base.footRadius * 2}
+                          min={90}
+                          max={160}
+                          step={2}
+                          unit="mm"
+                          dark={isNight}
+                          onChange={(dia) => updateBase({ footRadius: dia * 0.5 }, true)}
+                          onCommit={onCommitGeometry}
+                        />
+                      </>
+                    )}
                     {config.base.style === 'cylinder' && (
                       <StudioSlider
                         label="Cuello flotante visible"

@@ -1,6 +1,10 @@
 import { LampConfig } from '../types/lamp';
 import {
   BAYONET_DEPTH_MM,
+  COMPACT_FLUSH_COLLAR_RADIUS_MM,
+  COMPACT_FLUSH_HEIGHT_MM,
+  COMPACT_FLUSH_OUTER_RADIUS_MM,
+  COMPACT_FLUSH_RIM_HEIGHT_MM,
   THREAD_DEPTH_MM,
   couplingUsesBayonet,
   evaluateMaleCouplingOffset,
@@ -413,7 +417,8 @@ export function buildIndependentBase(
   const mb = new SolidMeshBuilder();
   const { base, mount } = config;
 
-  const isRibbed = base.finish === 'ribbed' && base.style !== 'tripod';
+  const isRibbed =
+    base.finish === 'ribbed' && base.style !== 'tripod' && base.style !== 'compact_flush';
   const ribCount = Math.max(40, Math.min(100, Math.round(base.ribCount || 64)));
   const N = isRibbed
     ? draft
@@ -531,6 +536,78 @@ export function buildIndependentBase(
   const slotH = BASE_CORD_SLOT_HEIGHT_MM; // 5.0 mm
   const slotW = BASE_CORD_SLOT_WIDTH_MM; // 6.5 mm
   const gableClearY = slotH + 4.0; // 9.0 mm safe ceiling above 45° peaked cord roof
+
+  // --- STYLE 0: COMPACT FLUSH (Ø 75.0 × 15.0 mm Bambu LED Kit 001 housing with 3-lug bayonet) ---
+  if (base.style === 'compact_flush') {
+    const totalH = clipHeightMm ? Math.min(COMPACT_FLUSH_HEIGHT_MM, Math.max(12.0, clipHeightMm)) : COMPACT_FLUSH_HEIGHT_MM;
+    const rRim = COMPACT_FLUSH_OUTER_RADIUS_MM; // 37.50 mm (Ø 75.0 mm)
+    const rCollar = COMPACT_FLUSH_COLLAR_RADIUS_MM; // 36.75 mm (Ø 73.5 mm)
+    const rimH = COMPACT_FLUSH_RIM_HEIGHT_MM; // 5.5 mm
+    const cfSlotH = 2.8; // 2.8 mm vertical walls + 45° gable peak (+2.1 mm) => 4.9 mm total clearance < 5.5 mm rim!
+    const cfSlotW = 6.5;
+
+    const outer: ProfileNode[] = [
+      { y: 0, r: rRim },
+      { y: cfSlotH, r: rRim },
+      { y: rimH, r: rRim },
+      { y: rimH, r: rCollar },
+    ];
+
+    // Bayonet collar y ∈ [5.5, totalH] with 3 locking lugs (+1.5 mm at 60°, 180°, 300°)
+    const collarSegs = draft ? 14 : 26;
+    for (let i = 1; i <= collarSegs; i++) {
+      const y = rimH + ((totalH - rimH) * i) / collarSegs;
+      outer.push({
+        y,
+        r: rCollar,
+        rFn: (theta: number) => rCollar + evaluateMaleCouplingOffset(theta, y, base),
+      });
+    }
+
+    const inner: ProfileNode[] = [];
+    if (isLed) {
+      // Exact Ø 59.7 mm (adjustable with ledTolerance) × 8.5 mm deep upper LED Kit 001 cup (y = 6.5..15.0)
+      const rCup = Math.min(rCollar - 2.9, led.cavityRadiusMm);
+      const rBore = Math.min(led.cableConduitRadiusMm, rCup - 4.0);
+      const cupFloorY = Math.max(rimH + 0.8, totalH - led.cavityHeightMm); // 6.5 mm at totalH = 15.0 mm
+      const halfNotchRad = Math.asin(clamp((led.cupCordNotchWidthMm * 0.5) / rCup, 0.04, 0.35));
+
+      const rWithNotch = (theta: number, rBase: number): number => {
+        const wrapped = Math.atan2(Math.sin(theta), Math.cos(theta));
+        const mask = 1 - smoothstep(halfNotchRad - 0.025, halfNotchRad + 0.025, Math.abs(wrapped));
+        return rBase + (rCup - rBase) * mask;
+      };
+
+      const rSlotIn = Math.min(rCup, rBore + (rimH - cfSlotH)); // 45° self-supporting bevel below shelf!
+      const rSlotFn = (theta: number) => Math.min(rCup, rWithNotch(theta, rBore) + (rimH - cfSlotH));
+
+      inner.push({ y: totalH, r: rCup + 0.35 });
+      inner.push({ y: totalH - 0.45, r: rCup });
+      inner.push({ y: cupFloorY, r: rCup });
+      inner.push({ y: cupFloorY, r: rBore, rFn: (theta) => rWithNotch(theta, rBore) });
+      // Floor thickness down to rimH (5.5 mm), strictly above 45° gable roof peak (4.9 mm)!
+      inner.push({ y: rimH, r: rBore, rFn: (theta) => rWithNotch(theta, rBore) });
+      inner.push({ y: cfSlotH, r: rSlotIn, rFn: rSlotFn });
+      inner.push({ y: 0, r: rSlotIn, rFn: rSlotFn });
+    } else {
+      // Clean E26/E27 fallback inside the Ø 75 × 15 mm compact housing (100% watertight & 45° vaulted)
+      const cBot = Math.max(rimH + 2.5, totalH - e26CeilingThick);
+      const rHole = e26.holeRadiusMm;
+      const rMid = Math.min(rCollar - 4.0, rHole + (cBot - rimH));
+      const rBot = Math.min(rCollar - 3.5, rMid + (rimH - cfSlotH));
+      inner.push({ y: totalH, r: rHole });
+      inner.push({ y: cBot, r: rHole });
+      inner.push({ y: rimH, r: rMid });
+      inner.push({ y: cfSlotH, r: rBot });
+      inner.push({ y: 0, r: rBot });
+    }
+
+    buildClosedRevolutionWithOptionalCordSlot(mb, N, outer, inner, {
+      widthMm: cfSlotW,
+      heightMm: cfSlotH,
+    });
+    return mb;
+  }
 
   // --- STYLE 1: DOME ---
   if (base.style === 'dome') {

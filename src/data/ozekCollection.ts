@@ -101,35 +101,37 @@ function buildZen02(): LampConfig {
   cfg.silhouette.skirtWaveAmp = 0;
   cfg.silhouette.closeTopDome = true; // Real closed mathematical sphere to R = 0 mm!
   cfg.silhouette.includeDiffuser = false;
-  // Integrated 1-Piece Sphere with Bambu LED Kit 001 flush in the flat bottom cut (zero extra pedestal!)
-  cfg.silhouette.buildMode = 'monoblock';
+  // 2-Piece Flush Sphere resting dead-flat on Z = 0 with embedded Ø 75 × 15 mm Compact Flush LED Kit 001 base!
+  cfg.silhouette.buildMode = 'two_part';
 
   cfg.organic.mode = 'gravity';
-  cfg.organic.voronoiCells = 4;
-  cfg.organic.voronoiSoftness = 0.8;
+  cfg.organic.voronoiCells = 16;
+  cfg.organic.voronoiSoftness = 0.78;
   cfg.organic.voronoiDispersion = 0.5;
-  cfg.organic.colorByStrand = true;
-  cfg.organic.gravityAccel = -7.8;
+  cfg.organic.colorByStrand = false;
+  cfg.organic.gravityAccel = -6.8;
   cfg.organic.finCount = 24;
   cfg.organic.flameWaves = 3;
-  cfg.organic.finDepth = 21.0;
-  cfg.organic.depth = 21.0;
+  cfg.organic.finDepth = 20.0;
+  cfg.organic.depth = 20.0;
   cfg.organic.finThickness = 1.4;
   cfg.organic.finLift = 0.2;
 
-  cfg.base.style = 'cylinder';
+  cfg.base.style = 'compact_flush';
   cfg.base.finish = 'smooth';
-  cfg.base.height = 42;
-  cfg.base.footRadius = 52;
+  cfg.base.height = 15;
+  cfg.base.footRadius = 37.5;
   cfg.base.coupling = 'bayonet';
-  cfg.base.signatureGrooves = true;
+  cfg.base.bayonetLugs = 3;
+  cfg.base.couplingClearance = 0.35;
+  cfg.base.signatureGrooves = false;
   cfg.base.collarRevealMm = 0;
 
   cfg.mount.type = 'led_kit_001';
   cfg.mount.position = 'bottom';
 
   cfg.visual.material = 'ozek_sand';
-  cfg.visual.baseMaterial = 'ozek_onyx';
+  cfg.visual.baseMaterial = 'ozek_sand';
   cfg.visual.colorMode = 'solid';
   cfg.visual.lightOn = true;
   cfg.visual.lightIntensity = 1.6;
@@ -240,9 +242,9 @@ export const OZEK_SIGNATURE_COLLECTION: OzekSignaturePiece[] = [
     id: 'zen-02',
     code: 'ZEN 02',
     title: 'Equilibrio',
-    subtitle: 'Esfera Integrada 1 Pieza · Celdas Voronoi 3D + LED 001',
-    badge: '1 Pieza · Esfera R=0',
-    swatches: ['#F5F2EB', '#252525'],
+    subtitle: 'Esfera Isocontornos 3D + Base Empotrada Al Ras (Ø75 × 15 mm)',
+    badge: '2 Piezas · Al Ras 15 mm',
+    swatches: ['#F5F2EB', '#D6D0C4'],
     config: buildZen02(),
   },
   {

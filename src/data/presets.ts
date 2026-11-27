@@ -59,7 +59,7 @@ const SHARED_ORGANIC = {
   mode: 'flames' as const,
   finCount: 24,
   flameWaves: 3,
-  voronoiCells: 4,
+  voronoiCells: 16,
   voronoiSoftness: 0.78,
   voronoiDispersion: 0.5,
   colorByStrand: false,
@@ -70,16 +70,16 @@ const SHARED_ORGANIC = {
   windFinCount: 60,
   windDirectionDeg: 45,
   windIntensity: 110,
-  finDepth: 21.0,
+  finDepth: 20.0,
   finThickness: 1.4,
   finLift: 0.2,
-  gravityAccel: -7.8,
+  gravityAccel: -6.8,
   gravityTwistDeg: 0,
   smoothPasses: 3,
   scale: 1.85,
   warp: 1.1,
   bands: 5,
-  depth: 21.0,
+  depth: 20.0,
   overhangSmoothing: 0.45,
   seed: 3141,
 };
@@ -95,25 +95,35 @@ export function applySizePreset(current: LampConfig, size: LampSizePreset): Lamp
     next.silhouette.buildMode === 'two_part' && next.mount.position === 'bottom';
 
   const currentTotal = isTwoPart
-    ? next.silhouette.height + (next.base.style === 'conkel' ? 12 : next.base.height)
+    ? next.silhouette.height +
+      (next.base.style === 'compact_flush'
+        ? 0
+        : next.base.style === 'conkel'
+          ? 12
+          : next.base.height)
     : next.silhouette.height;
   const ratio = Math.max(0.62, Math.min(1.45, targetTotal / Math.max(100, currentTotal)));
   const radScale = Math.max(0.76, Math.min(1.24, Math.pow(ratio, 0.55)));
 
   if (isTwoPart) {
     const basePart =
-      next.base.style === 'conkel'
-        ? next.mount.type === 'e26_e27'
-          ? 55
-          : 18
-        : Math.round(Math.max(42, Math.min(90, next.base.height * ratio)) / 2) * 2;
+      next.base.style === 'compact_flush'
+        ? 15
+        : next.base.style === 'conkel'
+          ? next.mount.type === 'e26_e27'
+            ? 55
+            : 18
+          : Math.round(Math.max(42, Math.min(90, next.base.height * ratio)) / 2) * 2;
     next.base.height = basePart;
-    const seatContribution = next.base.style === 'conkel' ? 12 : basePart;
+    const seatContribution =
+      next.base.style === 'compact_flush' ? 0 : next.base.style === 'conkel' ? 12 : basePart;
     next.silhouette.height = Math.max(
       95,
       Math.min(238, Math.round((targetTotal - seatContribution) / 2) * 2)
     );
-    next.base.footRadius = Math.max(45, Math.min(78, Math.round(next.base.footRadius * radScale)));
+    if (next.base.style !== 'compact_flush') {
+      next.base.footRadius = Math.max(45, Math.min(78, Math.round(next.base.footRadius * radScale)));
+    }
   } else {
     next.silhouette.height = Math.min(248, targetTotal);
   }

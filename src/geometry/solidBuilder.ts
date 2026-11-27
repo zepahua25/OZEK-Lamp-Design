@@ -3,6 +3,8 @@ import { aggregateMetrics, finalizePartGeometry } from './analyzer';
 import { buildIndependentBase, SolidMeshBuilder } from './baseBuilder';
 import {
   BAYONET_DEPTH_MM,
+  COMPACT_FLUSH_LUG_DEPTH_MM,
+  COMPACT_FLUSH_RIM_HEIGHT_MM,
   THREAD_DEPTH_MM,
   couplingUsesBayonet,
   evaluateFemaleCouplingRadius,
@@ -521,35 +523,45 @@ function buildCoupledShade(
   const wallT = clamp(mount.wallThickness, 1.6, 3.2);
   const evalWall = createWallEvaluator(config, false);
 
-  const isSpider = base.coupling === 'spider';
+  const isCompactFlush = base.style === 'compact_flush';
+  const isSpider = !isCompactFlush && base.coupling === 'spider';
   const rMaleBase = getEffectiveNeckRadius(config);
-  const extraCouplingDepth = couplingUsesBayonet(base)
-    ? BAYONET_DEPTH_MM + 0.25
-    : base.coupling === 'thread'
-      ? THREAD_DEPTH_MM
-      : 0;
+  const extraCouplingDepth = isCompactFlush
+    ? COMPACT_FLUSH_LUG_DEPTH_MM + 0.25
+    : couplingUsesBayonet(base)
+      ? BAYONET_DEPTH_MM + 0.25
+      : base.coupling === 'thread'
+        ? THREAD_DEPTH_MM
+        : 0;
   const effectiveClr =
-    base.coupling === 'gravity_seat'
+    !isCompactFlush && base.coupling === 'gravity_seat'
       ? Math.max(0.4, base.couplingClearance)
-      : base.couplingClearance;
+      : clamp(base.couplingClearance, 0.2, 0.65);
   const rHubOut =
     rMaleBase + effectiveClr + extraCouplingDepth + Math.max(2.6, wallT + 0.6);
 
-  // Optional Organic Wavy Bottom Skirt (0 - 15 mm, 3 - 8 waves)
-  const waveAmp = clamp(silhouette.skirtWaveAmp || 0, 0, 15);
+  // Optional Organic Wavy Bottom Skirt (0 - 15 mm, 3 - 8 waves; disabled when flush-embedded)
+  const waveAmp = isCompactFlush ? 0 : clamp(silhouette.skirtWaveAmp || 0, 0, 15);
   const waveCount = Math.max(3, Math.min(8, Math.round(silhouette.skirtWaveCount || 5)));
   const hasWavySkirt = waveAmp > 0.15;
 
   // When coupling === 'spider' and skirtWaveAmp === 0, the central bayonet/hub ring and 4 flat spokes
   // sit FLUSH on Z = 0 .. 3.5 mm directly connected to the shade bottom rim (prints upright 0% supports!).
-  // Only when wavy skirt > 0 mm do the 4 spider arms slope upward at 45° for 180° upside-down printing.
-  const deckH = isSpider && !hasWavySkirt ? 3.5 : 3.2;
+  // When base.style === 'compact_flush', deckH = 5.5 mm (matching the Ø75 mm rim counterbore) with D = 1
+  // so row 0 can smoothly lift a 45° rear USB exit arch (0..4.5 mm < 5.5 mm) at theta = 0 with 0 open edges!
+  const deckH = isCompactFlush
+    ? COMPACT_FLUSH_RIM_HEIGHT_MM
+    : isSpider && !hasWavySkirt
+      ? 3.5
+      : 3.2;
   const collarH = getCouplingHeightMm(base);
 
   const sampleBaseR = evaluateSilhouetteRadius(0, silhouette);
-  const canVent = isSpider
-    ? sampleBaseR - wallT > rHubOut + 5.0
-    : base.shadeVentilation && sampleBaseR - wallT > rHubOut + 8.5;
+  const canVent = isCompactFlush
+    ? false
+    : isSpider
+      ? sampleBaseR - wallT > rHubOut + 5.0
+      : base.shadeVentilation && sampleBaseR - wallT > rHubOut + 8.5;
 
   let spokeCount = mount.ventSlots;
   let spokeFillRatio = 0.28;
@@ -562,10 +574,24 @@ function buildCoupledShade(
   const layout = buildAngularLayout(radialSegs, null, spokeCount, canVent, spokeFillRatio);
   const { N, thetas, isSpoke } = layout;
 
-  const deckSubdivs = draft ? 3 : 6;
-  const upperCollarSubdivs = draft ? 8 : 16;
+  const deckSubdivs = isCompactFlush ? 1 : draft ? 3 : 6;
+  const upperCollarSubdivs = isCompactFlush ? (draft ? 14 : 26) : draft ? 8 : 16;
   const D = deckSubdivs;
   const C = deckSubdivs + upperCollarSubdivs;
+
+  // For Compact Flush (seatY = 0), lift row 0 around theta = 0 in a crisp 45° peaked arch (4.5 mm high, ~9.5 mm wide)
+  // aligned directly with the Ø 75 × 15 mm base's rear USB cable slot so the cord exits flush under the sphere!
+  const flushCordHalfRad = isCompactFlush
+    ? Math.asin(clamp(4.7 / Math.max(38, sampleBaseR), 0.075, 0.16))
+    : 0;
+  const flushCordPeakMm = isCompactFlush ? 4.5 : 0;
+  const flushCordArchAtTheta = (theta: number): number => {
+    if (!isCompactFlush) return 0;
+    const wrapped = Math.atan2(Math.sin(theta), Math.cos(theta));
+    const a = Math.abs(wrapped);
+    if (a >= flushCordHalfRad) return 0;
+    return (1 - a / flushCordHalfRad) * flushCordPeakMm;
+  };
 
   // Vertical rows for the female coupling hub (always sitting at seatY .. seatY + collarH)
   const collarY: number[] = [];
@@ -645,8 +671,9 @@ function buildCoupledShade(
         minInnerAtBottom,
         deckH + 1.5
       );
-      oArr[u] = mb.addCyl(s.rOut, theta, yWorld, s.localThickness);
-      iArr[u] = mb.addCyl(s.rIn, theta, yWorld - yInOffset, s.localThickness);
+      const yVert = row === 0 ? yWorld + flushCordArchAtTheta(theta) : yWorld;
+      oArr[u] = mb.addCyl(s.rOut, theta, yVert, s.localThickness);
+      iArr[u] = mb.addCyl(s.rIn, theta, yVert - yInOffset, s.localThickness);
     }
     outRing.push(oArr);
     inRing.push(iArr);
@@ -692,15 +719,15 @@ function buildCoupledShade(
   const hubOut: Int32Array[] = [];
   for (let row = 0; row <= C; row++) {
     const yWorld = collarY[row];
-    const localY = yWorld - seatY;
     const hInArr = new Int32Array(N);
     const hOutArr = new Int32Array(N);
     for (let u = 0; u < N; u++) {
       const theta = thetas[u];
-      const rInCollar = evaluateFemaleCouplingRadius(rMaleBase, theta, localY, base);
+      const yVert = row === 0 ? yWorld + flushCordArchAtTheta(theta) : yWorld;
+      const rInCollar = evaluateFemaleCouplingRadius(rMaleBase, theta, yVert - seatY, base);
       const safeRIn = Math.min(rInCollar, rHubOut - 1.4);
-      hInArr[u] = mb.addCyl(safeRIn, theta, yWorld, rHubOut - safeRIn);
-      hOutArr[u] = mb.addCyl(rHubOut, theta, yWorld, rHubOut - safeRIn);
+      hInArr[u] = mb.addCyl(safeRIn, theta, yVert, rHubOut - safeRIn);
+      hOutArr[u] = mb.addCyl(rHubOut, theta, yVert, rHubOut - safeRIn);
     }
     hubIn.push(hInArr);
     hubOut.push(hOutArr);
@@ -876,9 +903,9 @@ function buildInternalDiffuser(
   const collarClearY = mount.type === 'led_kit_001' ? getCouplingHeightMm(config.base) : 0;
   const diffHeight = Math.max(50, silhouette.height * 0.86 - collarClearY);
   const yStart = seatY + collarClearY;
-  const ySeatStep = seatY + 4.5;
+  const ySeatStep = yStart + 4.5;
   const yFlareEnd = ySeatStep + Math.abs(rBodyOut - rSeatOut);
-  const yEnd = seatY + diffHeight;
+  const yEnd = Math.max(ySeatStep + 12, seatY + diffHeight);
 
   const yLevels =
     Math.abs(rBodyOut - rSeatOut) > 0.4

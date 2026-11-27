@@ -25,7 +25,7 @@ export type MountPosition = 'bottom' | 'top';
 
 export type BuildMode = 'two_part' | 'monoblock';
 
-export type BaseStyleId = 'dome' | 'pedestal' | 'cylinder' | 'conkel' | 'tripod';
+export type BaseStyleId = 'dome' | 'pedestal' | 'cylinder' | 'conkel' | 'tripod' | 'compact_flush';
 
 export type BaseFinish = 'smooth' | 'ribbed';
 

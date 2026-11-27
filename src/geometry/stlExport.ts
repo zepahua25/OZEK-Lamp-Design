@@ -89,7 +89,8 @@ export function generateBambuStudioGuide(
   const isTwoPart =
     config.silhouette.buildMode === 'two_part' && config.mount.position === 'bottom';
   const hasWavySkirt = config.silhouette.skirtWaveAmp > 0.2;
-  const isSpider = isTwoPart && config.base.coupling === 'spider';
+  const isSpider = isTwoPart && config.base.coupling === 'spider' && config.base.style !== 'compact_flush';
+  const isCompactFlush = isTwoPart && config.base.style === 'compact_flush';
   const isTripod = isTwoPart && config.base.style === 'tripod';
   const isPendant = config.mount.position === 'top';
   const isOrganic = config.family === 'organic';
@@ -130,7 +131,13 @@ export function generateBambuStudioGuide(
     '--- ORIENTACIÓN EN CAMA (SIN SOPORTES) ---'
   );
 
-  if (isTripod) {
+  if (isCompactFlush) {
+    lines.push(
+      '  • Base Compacta / Al ras (Ø 75.0 × 15.0 mm): Imprimir derecha en Z = 0 (0% soportes).',
+      '    Encaja empotrada al ras dentro de la esfera con bayoneta de 3 pestañas (Ø 74.2 mm).',
+      '    Alinear la salida trasera de cable USB (techo a 45°) con el arco trasero de la esfera.'
+    );
+  } else if (isTripod) {
     lines.push(
       '  • Base Trípode: YA VIENE EXPORTADA BOCA ABAJO (anillo plano en Z=0) para imprimir',
       '    las 3 patas hacia arriba (< 42°) 100% sin soportes.'

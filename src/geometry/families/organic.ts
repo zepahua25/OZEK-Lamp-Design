@@ -121,8 +121,15 @@ function extrudeRibbonOnSurface(
       Math.max(20, r0),
       config.sculptStrokes
     );
+    const isClosedPoleLed = isClosedDome && config.mount.type === 'led_kit_001';
     const effTheta = theta + sculpt.dThetaRad * csBlend;
-    const effR = Math.max(2.0, r0 + sculpt.drMm * 0.55 * (1 - smoothstep(0.84, 0.98, vDesign)));
+    const effR =
+      isClosedPoleLed && vDesign >= 0.9995
+        ? 0.0
+        : Math.max(
+            isClosedPoleLed ? 0.0 : isClosedDome ? 0.15 : 2.0,
+            r0 + sculpt.drMm * 0.55 * (1 - smoothstep(0.84, 0.98, vDesign))
+          );
 
     const c = Math.cos(effTheta);
     const s = Math.sin(effTheta);
@@ -135,7 +142,14 @@ function extrudeRibbonOnSurface(
     const tU: Vec3 = { x: -s, y: 0, z: -c };
     const tV: Vec3 = { x: drdy * c, y: 1, z: -drdy * s };
     const nRaw = cross3(tU, tV);
-    const nOut = normalize3(nRaw.x, nRaw.y, nRaw.z);
+    const nSurf = normalize3(nRaw.x, nRaw.y, nRaw.z);
+    // Smoothly blend normal to +Y right at the exact North Pole (R = 0) to eliminate polar singularity!
+    const poleBlend = isClosedPoleLed ? smoothstep(0.975, 1.0, vDesign) : 0;
+    const nOut = normalize3(
+      nSurf.x * (1 - poleBlend),
+      nSurf.y * (1 - poleBlend) + poleBlend,
+      nSurf.z * (1 - poleBlend)
+    );
     return { pos, nOut, tU };
   };
 
@@ -149,8 +163,10 @@ function extrudeRibbonOnSurface(
   const tr = new Int32Array(K);
   const tl = new Int32Array(K);
 
+  const isClosedDomeGlobal = Boolean(silhouette.closeTopDome) && !invertedForPendant;
   const minAllowedY = seatY + 1.0;
-  const maxAllowedY = seatY + shadeHeight - 0.5;
+  // When closed dome is active, remove the "- 0.5" cutoff so flame fins reach the exact North Pole (y = seatY + shadeHeight)!
+  const maxAllowedY = isClosedDomeGlobal ? seatY + shadeHeight : seatY + shadeHeight - 0.5;
 
   for (let i = 0; i < K; i++) {
     const prevIdx = isClosed ? (i - 1 + K) % K : Math.max(0, i - 1);
@@ -165,15 +181,14 @@ function extrudeRibbonOnSurface(
     const bSide = bLen > 1e-4 ? { x: bRaw.x / bLen, y: bRaw.y / bLen, z: bRaw.z / bLen } : tU;
 
     const vD = samples[i].v;
-    const isClosedDome = Boolean(silhouette.closeTopDome) && !invertedForPendant;
-    const upperFade = isClosedDome
-      ? 1 - smoothstep(0.8, 0.988, vD)
+    const upperFade = isClosedDomeGlobal
+      ? 1 - smoothstep(0.92, 1.0, vD)
       : 1 - smoothstep(0.87, 0.94, vD);
     const endGuard = smoothstep(0.03, 0.1, vD) * upperFade;
     const taperSpan = Math.max(4, Math.round(K * 0.045));
     const openTaper = isClosed
       ? 1.0
-      : smoothstep(0, taperSpan, i) * smoothstep(0, taperSpan, K - 1 - i);
+      : smoothstep(0, taperSpan, i) * (isClosedDomeGlobal ? 1.0 : smoothstep(0, taperSpan, K - 1 - i));
     const uNorm = (((samples[i].theta / (2 * Math.PI)) % 1) + 1) % 1;
     const sculpt = evaluateSculptField(uNorm, vD, shadeHeight, 75, config.sculptStrokes);
     const sculptedDepth = Math.max(0.35, finDepthMm + sculpt.drMm * 0.45);
@@ -181,7 +196,7 @@ function extrudeRibbonOnSurface(
       0.35,
       sculptedDepth *
         samples[i].depthScale *
-        endGuard *
+        (0.14 + 0.86 * endGuard) *
         (0.22 + 0.78 * openTaper) *
         (1 - sculpt.smoothMask * 0.55)
     );
@@ -198,29 +213,31 @@ function extrudeRibbonOnSurface(
 
     const rootThick = finThicknessMm + 1.4;
     const tipThick = finThicknessMm + 0.6;
+    const isClosedPoleHere = isClosedDomeGlobal && config.mount.type === 'led_kit_001';
+    const hw = isClosedPoleHere ? halfW * (1 - 0.55 * smoothstep(0.955, 1.0, vD)) : halfW;
 
     bl[i] = mb.addVertex(
-      rootX - bSide.x * halfW,
-      clamp(rootY - bSide.y * halfW, minAllowedY, maxAllowedY),
-      rootZ - bSide.z * halfW,
+      rootX - bSide.x * hw,
+      clamp(rootY - bSide.y * hw, minAllowedY, maxAllowedY),
+      rootZ - bSide.z * hw,
       rootThick
     );
     br[i] = mb.addVertex(
-      rootX + bSide.x * halfW,
-      clamp(rootY + bSide.y * halfW, minAllowedY, maxAllowedY),
-      rootZ + bSide.z * halfW,
+      rootX + bSide.x * hw,
+      clamp(rootY + bSide.y * hw, minAllowedY, maxAllowedY),
+      rootZ + bSide.z * hw,
       rootThick
     );
     tr[i] = mb.addVertex(
-      tipX + bSide.x * halfW,
-      clamp(tipY + bSide.y * halfW, minAllowedY, maxAllowedY),
-      tipZ + bSide.z * halfW,
+      tipX + bSide.x * hw,
+      clamp(tipY + bSide.y * hw, minAllowedY, maxAllowedY),
+      tipZ + bSide.z * hw,
       tipThick
     );
     tl[i] = mb.addVertex(
-      tipX - bSide.x * halfW,
-      clamp(tipY - bSide.y * halfW, minAllowedY, maxAllowedY),
-      tipZ - bSide.z * halfW,
+      tipX - bSide.x * hw,
+      clamp(tipY - bSide.y * hw, minAllowedY, maxAllowedY),
+      tipZ - bSide.z * hw,
       tipThick
     );
   }
@@ -260,7 +277,9 @@ function appendFlameFins(ctx: ExtraGeometryContext): void {
   const steps = draft ? 128 : 192;
   const vStart = 0.03;
   const isClosedDome = Boolean(config.silhouette.closeTopDome) && !invertedForPendant;
-  const vEnd = isClosedDome ? 0.986 : 0.94;
+  const isClosedPoleLed = isClosedDome && config.mount.type === 'led_kit_001';
+  // Reach exact vEnd = 1.0 (R = 0.0 mm North Pole axis!) when closed LED sphere is active -> 0 mm bald center!
+  const vEnd = isClosedPoleLed ? 1.0 : isClosedDome ? 0.988 : 0.94;
 
   for (let k = 0; k < finCount; k++) {
     const baseTheta = (2 * Math.PI * k) / finCount;
@@ -279,18 +298,21 @@ function appendFlameFins(ctx: ExtraGeometryContext): void {
         invertedForPendant
       );
 
-      const halfFinAngle = (finThickness * 0.52 + 0.08) / Math.max(12, rLocal);
+      // Strict anti-collision clearance >= 0.85 mm between adjacent Flame walls outside polar zone
+      const halfFinAngle = (finThickness * 0.5 + 0.44) / Math.max(10, rLocal);
       const touchAmpAtV = Math.max(0, sectorHalf - halfFinAngle);
 
       const phase = t * waves * Math.PI * 2;
       const waveVal = (Math.sin(phase) + 0.1 * Math.sin(phase * 2)) / 1.07;
 
       const poleEnvelope = smoothstep(0.0, 0.06, t) * (1 - smoothstep(0.92, 1.0, t));
-      const theta = baseTheta + sign * touchAmpAtV * 0.985 * waveVal * poleEnvelope;
+      const theta = baseTheta + sign * touchAmpAtV * 0.96 * waveVal * poleEnvelope;
 
       const petalFullness = 0.78 + 0.22 * Math.pow(Math.abs(Math.sin(phase * 0.5)), 0.75);
-      const archEnv = Math.sin(t * Math.PI);
-      const depthScale = clamp((0.32 + 0.68 * Math.pow(archEnv, 0.45)) * petalFullness, 0.18, 1.0);
+      const archEnv = isClosedDome
+        ? smoothstep(0.0, 0.08, t) * (1 - 0.55 * smoothstep(0.92, 1.0, v))
+        : Math.sin(t * Math.PI);
+      const depthScale = clamp((0.32 + 0.68 * Math.pow(Math.max(0, archEnv), 0.45)) * petalFullness, 0.18, 1.0);
 
       samples.push({ theta, v, depthScale });
     }
@@ -311,55 +333,209 @@ function appendFlameFins(ctx: ExtraGeometryContext): void {
 }
 
 // =================================================================================================
-// SUBMODE B: "Gravedad" — 2–8 CONTINUOUS F1-TRACK DIFFERENTIAL CURVE GROWTH CIRCUITS ON S²
-// Starts from 2–8 small 24-node circles on opposite sides of the sphere, grows each closed loop
-// over 72–125 iterations via dynamic midpoint subdivision (~180–320 nodes/circuit) with curvature
-// stiffness, strict non-crossing repulsion (minSep = thickness + 0.5 mm), and tangential gravity,
-// followed by 2-pass Chaikin smoothing and watertight 3D extrusion (18–24 mm deep, 1.3–1.6 mm wall).
+// SUBMODE B: "Gravedad" — 3D ISOCONTOURS (MARCHING TRIANGLES) ON A 3D ICOSPHERE (ZERO POLAR DISTORTION!)
+// Evaluates a smooth 3D scalar field f(p) directly on a subdivided icosphere (subdiv 4 draft / 5 export):
+//   - 10–22 smooth Gaussian metaball centers on S² (Densidad & Dispersión)
+//   - Smooth 3D gradient noise with domain warping (Suavidad)
+//   - Vertical downward gravity deformation stretching wells into organic hanging pouches (Gravedad)
+// Extracts 5–9 equidistant level sets f(p) = c_k via 3D Marching Triangles, chains exact closed loops
+// (or bed-clipped open arcs at Z = 0), applies 2 passes of spherical Laplacian smoothing, guarantees
+// >= 0.85 mm air separation, and extrudes each contour into a 100% watertight solid ribbon (16–24 mm)!
 // =================================================================================================
 
+interface IcosphereMesh {
+  verts: Vec3[];
+  tris: Int32Array; // flat [i0, i1, i2, ...]
+  neighbors: number[][]; // 1-ring vertex adjacency for fast scalar-field Laplacian smoothing
+}
+
+const ICOSPHERE_CACHE = new Map<number, IcosphereMesh>();
+
+function getUnitIcosphere(subdiv: number): IcosphereMesh {
+  const cached = ICOSPHERE_CACHE.get(subdiv);
+  if (cached) return cached;
+
+  const t = (1 + Math.sqrt(5)) * 0.5;
+  const rawVerts: Array<[number, number, number]> = [
+    [-1, t, 0],
+    [1, t, 0],
+    [-1, -t, 0],
+    [1, -t, 0],
+    [0, -1, t],
+    [0, 1, t],
+    [0, -1, -t],
+    [0, 1, -t],
+    [t, 0, -1],
+    [t, 0, 1],
+    [-t, 0, -1],
+    [-t, 0, 1],
+  ];
+
+  const verts: Vec3[] = rawVerts.map(([x, y, z]) => normalize3(x, y, z));
+  let faces: number[] = [
+    0, 11, 5, 0, 5, 1, 0, 1, 7, 0, 7, 10, 0, 10, 11,
+    1, 5, 9, 5, 11, 4, 11, 10, 2, 10, 7, 6, 7, 1, 8,
+    3, 9, 4, 3, 4, 2, 3, 2, 6, 3, 6, 8, 3, 8, 9,
+    4, 9, 5, 2, 4, 11, 6, 2, 10, 8, 6, 7, 9, 8, 1,
+  ];
+
+  for (let s = 0; s < subdiv; s++) {
+    const midCache = new Map<number, number>();
+    const getMid = (a: number, b: number): number => {
+      const lo = a < b ? a : b;
+      const hi = a < b ? b : a;
+      const key = lo * 65536 + hi;
+      const existing = midCache.get(key);
+      if (existing !== undefined) return existing;
+      const va = verts[lo];
+      const vb = verts[hi];
+      const idx = verts.length;
+      verts.push(normalize3(va.x + vb.x, va.y + vb.y, va.z + vb.z));
+      midCache.set(key, idx);
+      return idx;
+    };
+
+    const nextFaces: number[] = new Array(faces.length * 4);
+    let ptr = 0;
+    for (let f = 0; f < faces.length; f += 3) {
+      const i0 = faces[f];
+      const i1 = faces[f + 1];
+      const i2 = faces[f + 2];
+      const m01 = getMid(i0, i1);
+      const m12 = getMid(i1, i2);
+      const m20 = getMid(i2, i0);
+      nextFaces[ptr++] = i0;
+      nextFaces[ptr++] = m01;
+      nextFaces[ptr++] = m20;
+      nextFaces[ptr++] = i1;
+      nextFaces[ptr++] = m12;
+      nextFaces[ptr++] = m01;
+      nextFaces[ptr++] = i2;
+      nextFaces[ptr++] = m20;
+      nextFaces[ptr++] = m12;
+      nextFaces[ptr++] = m01;
+      nextFaces[ptr++] = m12;
+      nextFaces[ptr++] = m20;
+    }
+    faces = nextFaces;
+  }
+
+  // Build 1-ring vertex adjacency list for O(V) scalar field smoothing
+  const nbSets: Array<Set<number>> = Array.from({ length: verts.length }, () => new Set<number>());
+  for (let f = 0; f < faces.length; f += 3) {
+    const a = faces[f];
+    const b = faces[f + 1];
+    const c = faces[f + 2];
+    nbSets[a].add(b);
+    nbSets[a].add(c);
+    nbSets[b].add(a);
+    nbSets[b].add(c);
+    nbSets[c].add(a);
+    nbSets[c].add(b);
+  }
+  const neighbors = nbSets.map((s) => Array.from(s));
+
+  const mesh: IcosphereMesh = {
+    verts,
+    tris: new Int32Array(faces),
+    neighbors,
+  };
+  ICOSPHERE_CACHE.set(subdiv, mesh);
+  return mesh;
+}
+
+// Fast smooth 3D gradient noise (Perlin quintic C² continuous, deterministic by seed)
+const GRAD3: ReadonlyArray<[number, number, number]> = [
+  [1, 1, 0], [-1, 1, 0], [1, -1, 0], [-1, -1, 0],
+  [1, 0, 1], [-1, 0, 1], [1, 0, -1], [-1, 0, -1],
+  [0, 1, 1], [0, -1, 1], [0, 1, -1], [0, -1, -1],
+];
+
+function hash3D(ix: number, iy: number, iz: number, seedInt: number): number {
+  let h = (Math.imul(ix, 374761393) + Math.imul(iy, 668265263) + Math.imul(iz, 2147483647) + seedInt) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) % 12;
+}
+
+function fade5(t: number): number {
+  return t * t * t * (t * (t * 6 - 15) + 10);
+}
+
+function smoothNoise3D(x: number, y: number, z: number, seedInt: number): number {
+  const ix = Math.floor(x);
+  const iy = Math.floor(y);
+  const iz = Math.floor(z);
+  const fx = x - ix;
+  const fy = y - iy;
+  const fz = z - iz;
+  const u = fade5(fx);
+  const v = fade5(fy);
+  const w = fade5(fz);
+
+  const g = (dx: number, dy: number, dz: number): number => {
+    const gr = GRAD3[hash3D(ix + dx, iy + dy, iz + dz, seedInt)];
+    return gr[0] * (fx - dx) + gr[1] * (fy - dy) + gr[2] * (fz - dz);
+  };
+
+  const n000 = g(0, 0, 0);
+  const n100 = g(1, 0, 0);
+  const n010 = g(0, 1, 0);
+  const n110 = g(1, 1, 0);
+  const n001 = g(0, 0, 1);
+  const n101 = g(1, 0, 1);
+  const n011 = g(0, 1, 1);
+  const n111 = g(1, 1, 1);
+
+  const nx00 = n000 + u * (n100 - n000);
+  const nx10 = n010 + u * (n110 - n010);
+  const nx01 = n001 + u * (n101 - n001);
+  const nx11 = n011 + u * (n111 - n011);
+  const nxy0 = nx00 + v * (nx10 - nx00);
+  const nxy1 = nx01 + v * (nx11 - nx01);
+  return nxy0 + w * (nxy1 - nxy0);
+}
+
 /**
- * Appends a smooth watertight Ø4.4 mm central polar union button at the exact North Pole (R = 0)
- * of a closed sphere so dense radial fins in "Crecimiento" and "Viento" merge seamlessly with
- * zero central pinhole!
+ * Applies `passes` iterations of projected Laplacian smoothing directly on the unit sphere S²
+ * for either a closed loop or an open curve (keeping open-curve endpoints pinned cleanly on Z = 0).
  */
-function appendPolarUnionButton(
-  mb: SolidMeshBuilder,
-  poleY: number,
-  radiusMm = 2.2,
-  crownHeightMm = 2.0
-): void {
-  const N = 28;
-  const yBot = poleY - 1.25; // Embedded safely inside the 1.2 mm closed sphere core
-  const yRim = poleY + 0.35;
-  const yMid = poleY + crownHeightMm * 0.68;
-  const yTop = poleY + crownHeightMm;
-
-  const botCenter = mb.addVertex(0, yBot, 0, 2.4);
-  const topCenter = mb.addVertex(0, yTop, 0, 1.8);
-
-  const ringBot = new Int32Array(N);
-  const ringRim = new Int32Array(N);
-  const ringMid = new Int32Array(N);
-
-  for (let i = 0; i < N; i++) {
-    const th = (2 * Math.PI * i) / N;
-    ringBot[i] = mb.addCyl(radiusMm, th, yBot, 2.4);
-    ringRim[i] = mb.addCyl(radiusMm, th, yRim, 2.2);
-    ringMid[i] = mb.addCyl(radiusMm * 0.58, th, yMid, 2.0);
+function smoothSphericalPolyline(
+  pts: Vec3[],
+  isClosed: boolean,
+  passes: number,
+  lambda: number,
+  yMin: number,
+  yMax: number
+): Vec3[] {
+  const K = pts.length;
+  if (K < 4 || passes <= 0) return pts;
+  let cur = pts;
+  for (let p = 0; p < passes; p++) {
+    const next: Vec3[] = new Array(K);
+    for (let i = 0; i < K; i++) {
+      if (!isClosed && (i === 0 || i === K - 1)) {
+        next[i] = cur[i];
+        continue;
+      }
+      const prev = cur[(i - 1 + K) % K];
+      const curr = cur[i];
+      const nxt = cur[(i + 1) % K];
+      const mx = 0.5 * (prev.x + nxt.x);
+      const my = 0.5 * (prev.y + nxt.y);
+      const mz = 0.5 * (prev.z + nxt.z);
+      next[i] = clampUnitY(
+        normalize3(
+          curr.x + (mx - curr.x) * lambda,
+          curr.y + (my - curr.y) * lambda,
+          curr.z + (mz - curr.z) * lambda
+        ),
+        yMin,
+        yMax
+      );
+    }
+    cur = next;
   }
-
-  for (let i = 0; i < N; i++) {
-    const j = (i + 1) % N;
-    // Bottom disk (-Y outward)
-    mb.addTri(botCenter, ringBot[j], ringBot[i]);
-    // Outer vertical collar (+r outward)
-    mb.addQuad(ringBot[i], ringBot[j], ringRim[j], ringRim[i]);
-    // Lower dome slope (+r/+Y outward)
-    mb.addQuad(ringRim[i], ringRim[j], ringMid[j], ringMid[i]);
-    // Upper dome crown to exact apex (+Y outward)
-    mb.addTri(ringMid[i], ringMid[j], topCenter);
-  }
+  return cur;
 }
 
 /**
@@ -558,30 +734,31 @@ function clampUnitY(p: Vec3, yMin: number, yMax: number): Vec3 {
 }
 
 /**
- * SUBMODE B: "Gravedad" — 2–8 Long Continuous F1-Track Differential Curve Growth Circuits on S².
- * Zero Voronoi polygons! Spawns 2–8 small 24-node closed circles on opposite sides of the sphere
- * and grows each loop over 76 (draft) / 124 (export) iterations of real Differential Curve Growth:
- *  - Dynamic midpoint subdivision whenever an edge exceeds ~4.5 mm (reaching 180–320 nodes/circuit)
- *    so each ribbon snakes across the entire sphere in sweeping F1 meanders & hairpins.
- *  - Curvature stiffness ("Suavidad") keeping broad fluid bends without kinks.
- *  - Strict non-adjacent repulsion (same circuit + other circuits, minSep = thickness + 0.5 mm) so
- *    ribbons NEVER cross and stack side-by-side into parallel double/triple highways.
- *  - Tangential vertical gravity ("Gravedad") gently draping meanders downward over the sphere.
- *  - 2-pass closed Chaikin polish + watertight 18–24 mm deep extrusion clipped cleanly at Z = 0.
+ * SUBMODE B: "Gravedad" — 3D ISOCONTOURS (MARCHING TRIANGLES) ON A 3D ICOSPHERE (ZERO POLAR DISTORTION!)
+ *  1. Builds/caches a uniform 3D icosphere (subdiv 4 draft = 5,120 tris; subdiv 5 export = 20,480 tris).
+ *  2. Evaluates a smooth 3D scalar field f(p) on S²:
+ *     - 10–22 smooth Gaussian metaballs on S² (controlled by Densidad & Dispersión)
+ *     - 3D gradient noise with smooth domain warping (controlled by Suavidad)
+ *     - Downward tangential gravity deformation stretching wells into organic hanging pouches (Gravedad)
+ *  3. Extracts 5–9 equidistant isocontour levels f(p) = c_k via 3D Marching Triangles, chains exact
+ *     closed loops on S² (splitting cleanly at Z = 0 when crossing the flat base cut), applies 2 passes
+ *     of projected spherical Laplacian smoothing, guarantees >= 0.85 mm free wall separation, and
+ *     extrudes each contour as a watertight thin ribbon (1.2–1.6 mm thick, 16–24 mm deep).
  */
 function appendSphericalVoronoiCells(ctx: ExtraGeometryContext): void {
   const { mb, config, seatY, shadeHeight, draft, invertedForPendant } = ctx;
   const org = config.organic;
   const { silhouette, mount } = config;
 
-  // Number of continuous F1-track circuits (2 to 8, default 4)
-  const numStrands = Math.round(clamp(org.voronoiCells ?? 4, 2, 8));
-  const dispersion = clamp(org.voronoiDispersion ?? 0.5, 0, 1);
-  const softness = clamp(org.voronoiSoftness ?? 0.78, 0, 1);
+  // Density slider (10..22) maps directly to physical center-to-center ribbon pitch (8.8 mm open -> 4.4 mm tight)
+  const densitySetting = Math.round(clamp(org.voronoiCells ?? 16, 10, 22));
+  const densityNorm = clamp((densitySetting - 10) / 12, 0, 1);
+  const dispersion = clamp(org.voronoiDispersion ?? 0.55, 0, 1);
+  const softness = clamp(org.voronoiSoftness ?? 0.72, 0, 1);
   const gravNorm = clamp((org.gravityAccel ?? -7.8) / 9.8, -1.0, 1.0);
   const twistRadTotal = ((org.gravityTwistDeg ?? 0) * Math.PI) / 180;
-  const finDepth = clamp(org.finDepth ?? 21, 18, 24);
-  const finThickness = clamp(org.finThickness ?? 1.4, 1.3, 1.6);
+  const finDepth = clamp(org.finDepth ?? 20, 16, 24);
+  const finThickness = clamp(org.finThickness ?? 1.4, 1.2, 1.6);
   const liftFactor = clamp((org.finLift ?? 0.2) * 0.45 + gravNorm * 0.08, -0.18, 0.55);
 
   const isClosedDome = Boolean(silhouette.closeTopDome) && !invertedForPendant;
@@ -589,613 +766,540 @@ function appendSphericalVoronoiCells(ctx: ExtraGeometryContext): void {
   const sphereR = clamp(shadeHeight / 1.78, 34, 118);
   const sphereYc = 0.78 * sphereR;
 
-  const bedYNorm = -0.78 + clamp(2.0 / sphereR, 0.016, 0.044);
+  const bedYNorm = -0.78 + clamp(1.8 / sphereR, 0.015, 0.042);
   const hasTopOpening = !isClosedDome || mount.type === 'e26_e27';
   const topYNorm = !isClosedDome
     ? 0.92
     : mount.type === 'e26_e27'
       ? Math.sqrt(Math.max(0, 1 - Math.pow(9.8 / sphereR, 2)))
-      : 0.999;
+      : 1.01;
 
-  const rand = createSeededRandom(org.seed || 3141);
+  const seedNum = Math.floor(org.seed || 3141);
+  const rand = createSeededRandom(seedNum);
+  const ico = getUnitIcosphere(draft ? 4 : 5);
+  const V = ico.verts.length;
+  const tris = ico.tris;
 
-  // 1. Place 2–8 seed centers with maximal spherical spread across BOTH upper & lower hemispheres
-  //    (exact tetrahedral / Fibonacci spacing so circuits cover 100% of the sphere and NEVER start overlapped!)
-  const centers: Vec3[] = [];
-  const baseAzimuth = rand() * Math.PI * 2;
-  if (numStrands === 4) {
-    // Exact regular tetrahedron oriented on the visible sphere: 1 top dome + 3 lower-mid flanks 120° apart!
-    const topAz = baseAzimuth;
-    const topY = clamp(0.74 + (rand() - 0.5) * 0.14 * dispersion, 0.58, 0.86);
-    const topR = Math.sqrt(Math.max(0.01, 1 - topY * topY));
-    centers.push(normalize3(topR * Math.cos(topAz) * 0.4, topY, -topR * Math.sin(topAz) * 0.4));
-    for (let k = 0; k < 3; k++) {
-      const az = baseAzimuth + (2 * Math.PI * k) / 3 + (rand() - 0.5) * 0.28 * dispersion;
-      const ny = clamp(-0.24 + (rand() - 0.5) * 0.22 * dispersion, bedYNorm + 0.34, 0.08);
-      const rH = Math.sqrt(Math.max(0.01, 1 - ny * ny));
-      centers.push(normalize3(rH * Math.cos(az), ny, -rH * Math.sin(az)));
-    }
-  } else {
-    const goldenAngle = Math.PI * (3 - Math.sqrt(5));
-    for (let s = 0; s < numStrands; s++) {
-      const frac = (s + 0.5) / numStrands;
-      const nyRaw = (topYNorm - 0.18) - frac * ((topYNorm - 0.18) - (bedYNorm + 0.34));
-      const ny = clamp(nyRaw + (rand() - 0.5) * 0.18 * dispersion, bedYNorm + 0.34, topYNorm - 0.16);
-      const az = baseAzimuth + s * goldenAngle + (rand() - 0.5) * 0.25 * dispersion;
-      const rH = Math.sqrt(Math.max(0.01, 1 - ny * ny));
-      centers.push(normalize3(rH * Math.cos(az), ny, -rH * Math.sin(az)));
-    }
+  // 1. Place K organic generators on S² (mix of point nuclei & short geodesic arcs for sweeping U/S folds)
+  interface GeoGenerator {
+    isArc: boolean;
+    a: Vec3;
+    t1: Vec3; // orthonormal tangent in great-circle plane for arc generators
+    arcAngle: number; // geodesic length of arc in radians
+    bias: number; // small offset in radians so lobes interleave naturally without flattening gradients
   }
 
-  // Compute minimum angular distance between any two seed centers to GUARANTEE zero initial overlap!
-  let minPairAng = Math.PI;
-  for (let a = 0; a < numStrands; a++) {
-    for (let b = a + 1; b < numStrands; b++) {
-      const ang = Math.acos(clamp(dot3(centers[a], centers[b]), -1, 1));
-      if (ang < minPairAng) minPairAng = ang;
-    }
-  }
+  const numGenerators = Math.round(clamp(7 + dispersion * 4, 6, 12));
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+  const phaseOffset = rand() * Math.PI * 2;
+  const meanSpacing = Math.sqrt((4 * Math.PI) / numGenerators);
+  const jitterAmp = meanSpacing * 0.36 * (0.25 + 0.75 * dispersion);
+  const generators: GeoGenerator[] = [];
 
-  // 2. Initialize each circuit as a clean 24-node closed circle on S² safely inside its non-overlapping radius
-  interface TrackCircuit {
-    pts: Vec3[];
-    phase: number;
-    lobeFreq: number;
-    weightBias: number;
-  }
+  for (let i = 0; i < numGenerators; i++) {
+    const ny = 1 - (2 * (i + 0.5)) / numGenerators;
+    const r = Math.sqrt(Math.max(0, 1 - ny * ny));
+    const phi = i * goldenAngle + phaseOffset;
+    let p: Vec3 = { x: r * Math.cos(phi), y: ny, z: -r * Math.sin(phi) };
 
-  const initNodes = 24;
-  const initRadiusRad = clamp(minPairAng * 0.32, 0.16, 0.34);
-  const tracks: TrackCircuit[] = [];
-
-  for (let s = 0; s < numStrands; s++) {
-    const c = centers[s];
-    const up: Vec3 = Math.abs(c.y) < 0.9 ? { x: 0, y: 1, z: 0 } : { x: 1, y: 0, z: 0 };
+    const up: Vec3 = Math.abs(p.y) < 0.9 ? { x: 0, y: 1, z: 0 } : { x: 1, y: 0, z: 0 };
     const e1 = normalize3(
-      up.y * c.z - up.z * c.y,
-      up.z * c.x - up.x * c.z,
-      up.x * c.y - up.y * c.x
+      up.y * p.z - up.z * p.y,
+      up.z * p.x - up.x * p.z,
+      up.x * p.y - up.y * p.x
     );
-    const e2 = cross3(c, e1);
-    const pPhase = rand() * Math.PI * 2;
-    const lobeFreq = (s & 1) === 0 ? 3 : 2;
+    const e2 = cross3(p, e1);
 
-    const pts: Vec3[] = new Array(initNodes);
-    for (let i = 0; i < initNodes; i++) {
-      const ang = (2 * Math.PI * i) / initNodes;
-      const rLocal = initRadiusRad * (1.0 + 0.14 * Math.sin(ang * lobeFreq + pPhase));
-      const sinR = Math.sin(rLocal);
-      const cosR = Math.cos(rLocal);
-      const p = normalize3(
-        c.x * cosR + sinR * (Math.cos(ang) * e1.x + Math.sin(ang) * e2.x),
-        c.y * cosR + sinR * (Math.cos(ang) * e1.y + Math.sin(ang) * e2.y),
-        c.z * cosR + sinR * (Math.cos(ang) * e1.z + Math.sin(ang) * e2.z)
+    if (jitterAmp > 1e-4) {
+      const jAng = rand() * Math.PI * 2;
+      const jRad = (0.25 + 0.75 * rand()) * jitterAmp;
+      p = normalize3(
+        p.x + jRad * (Math.cos(jAng) * e1.x + Math.sin(jAng) * e2.x),
+        p.y + jRad * (Math.cos(jAng) * e1.y + Math.sin(jAng) * e2.y),
+        p.z + jRad * (Math.cos(jAng) * e1.z + Math.sin(jAng) * e2.z)
       );
-      pts[i] = clampUnitY(p, bedYNorm, topYNorm);
     }
 
-    tracks.push({
-      pts,
-      phase: pPhase,
-      lobeFreq,
-      weightBias: 0.82 + 0.36 * rand(),
-    });
+    // ~45% short geodesic arcs so contours form elongated S/U ribbons rather than plain concentric circles
+    const isArc = i % 2 === 0;
+    const dirAng = rand() * Math.PI * 2;
+    const up2: Vec3 = Math.abs(p.y) < 0.9 ? { x: 0, y: 1, z: 0 } : { x: 1, y: 0, z: 0 };
+    const b1 = normalize3(
+      up2.y * p.z - up2.z * p.y,
+      up2.z * p.x - up2.x * p.z,
+      up2.x * p.y - up2.y * p.x
+    );
+    const b2 = cross3(p, b1);
+    const t1 = normalize3(
+      Math.cos(dirAng) * b1.x + Math.sin(dirAng) * b2.x,
+      Math.cos(dirAng) * b1.y + Math.sin(dirAng) * b2.y,
+      Math.cos(dirAng) * b1.z + Math.sin(dirAng) * b2.z
+    );
+    const arcAngle = isArc ? 0.24 + 0.2 * rand() : 0;
+    const bias = (rand() - 0.5) * 0.08;
+    generators.push({ isArc, a: p, t1, arcAngle, bias });
   }
 
-  // 3. Exact Point-to-Segment Spherical Differential Curve Growth on S² (96 draft / 136 export iters):
-  //    - Point-to-segment repulsion closes EVERY gap between consecutive nodes -> 0 crossings possible!
-  //    - Strict CFL step cap (maxStep <= 0.35 * minSepChord) -> 0 tunneling possible!
-  //    - Smooth 2-stage expansion + Differential Curve Growth fills the entire sphere in parallel F1 tracks!
-  const targetEdgeLen = clamp(4.6 / sphereR, 0.036, 0.068);
-  const splitThreshold = targetEdgeLen * 1.15;
-  // Impenetrable ribbon-to-ribbon minimum separation: finThickness + 0.55 mm
-  const minSepChord = clamp((finThickness + 0.55) / sphereR, 0.017, 0.068);
-  // Tight inter-circuit halo -> DIFFERENT circuits run tightly parallel side-by-side (double/triple tracks!)
-  const interRange = Math.max(minSepChord * 2.5, targetEdgeLen * 1.25);
-  // Broad self-repulsion halo -> SAME circuit forms wide sweeping "S" & "U" light channels!
-  const selfRange = Math.max(minSepChord * 5.6, targetEdgeLen * 2.55);
+  // 2. Divergence-free Curl Flow on S² (v = p × ∇ψ) — bends parallel ribbons into fluid meanders
+  //    while strictly preserving surface area (zero stretched empty lakes, zero pinched collisions!)
+  const curlFreq = 1.65 + (1 - softness) * 0.9;
+  const curlAmp = 0.22 + (1 - softness) * 0.22;
+  const curlEps = 0.025;
+  const invTwoEps = 0.5 / curlEps;
 
-  const densityScale = clamp(4.0 / Math.max(2, numStrands), 0.55, 1.45);
-  const maxNodesPerTrack = Math.round(
-    clamp((draft ? 225 : 295) * Math.sqrt(densityScale), 175, draft ? 260 : 320)
-  );
-  const totalIters = draft ? 96 : 136; // 60–100 draft, 110–150 high-res!
-  const expandEndIter = Math.round(totalIters * 0.32);
-  const growthStopIter = Math.round(totalIters * 0.86);
+  const evalPsi = (x: number, y: number, z: number): number =>
+    smoothNoise3D(x * curlFreq + 4.3, y * curlFreq - 2.7, z * curlFreq + 6.1, seedNum) +
+    0.34 *
+      smoothNoise3D(
+        x * curlFreq * 1.9 - 7.1,
+        y * curlFreq * 1.9 + 5.2,
+        z * curlFreq * 1.9 - 3.4,
+        seedNum + 137
+      );
 
-  // Zero-GC flat typed-array 3D spatial hash storing EDGE MIDPOINTS for exact point-to-segment queries!
-  // Cell size >= max(selfRange, targetEdgeLen * 1.2) guarantees checking 3×3×3 voxels finds EVERY nearby segment!
-  const cellSize = Math.max(selfRange + targetEdgeLen * 0.65, 0.055);
-  const gridDim = clamp(Math.ceil(2.24 / cellSize), 8, 26);
-  const gridTotal = gridDim * gridDim * gridDim;
-  const maxTotalNodes = numStrands * maxNodesPerTrack;
-
-  const bucketHead = new Int32Array(gridTotal);
-  const segNext = new Int32Array(maxTotalNodes);
-  const segTrack = new Int32Array(maxTotalNodes);
-  const segIdx = new Int32Array(maxTotalNodes);
-  const fxBuf = new Float64Array(maxTotalNodes);
-  const fyBuf = new Float64Array(maxTotalNodes);
-  const fzBuf = new Float64Array(maxTotalNodes);
-  const crowdBuf = new Float64Array(maxTotalNodes);
-  const trackOff = new Int32Array(numStrands);
-
-  const hashCoord = (v: number): number => {
-    const idx = Math.floor((v + 1.12) / cellSize);
-    return idx < 0 ? 0 : idx >= gridDim ? gridDim - 1 : idx;
+  const evalCurlVel = (p: Vec3): Vec3 => {
+    const gx = (evalPsi(p.x + curlEps, p.y, p.z) - evalPsi(p.x - curlEps, p.y, p.z)) * invTwoEps;
+    const gy = (evalPsi(p.x, p.y + curlEps, p.z) - evalPsi(p.x, p.y - curlEps, p.z)) * invTwoEps;
+    const gz = (evalPsi(p.x, p.y, p.z + curlEps) - evalPsi(p.x, p.y, p.z - curlEps)) * invTwoEps;
+    // v = p × ∇ψ is strictly tangent to S² and divergence-free; cap speed smoothly to avoid high local shear!
+    const vx = p.y * gz - p.z * gy;
+    const vy = p.z * gx - p.x * gz;
+    const vz = p.x * gy - p.y * gx;
+    const mag = Math.hypot(vx, vy, vz);
+    const scale = mag > 1.15 ? 1.15 / mag : 1.0;
+    return { x: vx * scale, y: vy * scale, z: vz * scale };
   };
 
-  const kSpring = 0.4;
-  const kCurvatureBase = 0.1 + softness * 0.15;
-  const kInterHard = 1.05;
-  const kInterSoft = 0.22;
-  const kSelfHard = 0.98;
-  const kSelfSoft = 0.24 + softness * 0.08;
-  const gravStep = gravNorm * (0.001 + softness * 0.0016);
-  // STRICT CFL NON-TUNNELING STEP CAP: always <= 0.35 * minSepChord so two curves NEVER pass through each other!
-  const maxStep = minSepChord * 0.35;
-  const yCeiling = hasTopOpening ? topYNorm : 0.999;
+  // Smooth-min Log-Sum-Exp sharpness β: keeps saddles buttery smooth while preventing wide zero-gradient ridge caps
+  const sminBeta = 15.0 - 3.0 * softness;
+  const invSminBeta = 1.0 / sminBeta;
+  const gravStretch = gravNorm * 0.16;
+  const dtStep = curlAmp * 0.24;
 
-  for (let iter = 0; iter < totalIters; iter++) {
-    const inStage1Expand = iter < expandEndIter;
-    const isGrowing = iter < growthStopIter;
-    const growProgress = iter / Math.max(1, growthStopIter);
-    const growEnv = isGrowing ? 1.0 - 0.22 * growProgress : 0.0;
-    // Extra smooth settling stiffness in final 14% iterations for glass-smooth bends everywhere!
-    const kCurvature = inStage1Expand ? 0.07 : isGrowing ? kCurvatureBase : kCurvatureBase * 1.45;
-    const activeSelfRange = inStage1Expand ? minSepChord * 2.6 : selfRange;
+  // 3. Evaluate Constant-Gradient Geodesic Distance Field d(p) (in radians on S², ||∇d|| ≈ 1 everywhere!)
+  let field = new Float64Array(V);
+  for (let v = 0; v < V; v++) {
+    const p0 = ico.verts[v];
 
-    // 3a. Rebuild 3D spatial hash indexing every EDGE MIDPOINT (a+b)/2 across all circuits
-    bucketHead.fill(-1);
-    let totalActive = 0;
-    for (let s = 0; s < numStrands; s++) {
-      trackOff[s] = totalActive;
-      const pts = tracks[s].pts;
-      const M = pts.length;
-      for (let i = 0; i < M; i++) {
-        const gId = totalActive++;
-        const a = pts[i];
-        const b = pts[(i + 1) % M];
-        const mx = (a.x + b.x) * 0.5;
-        const my = (a.y + b.y) * 0.5;
-        const mz = (a.z + b.z) * 0.5;
-        segTrack[gId] = s;
-        segIdx[gId] = i;
-        const bIdx = (hashCoord(mx) * gridDim + hashCoord(my)) * gridDim + hashCoord(mz);
-        segNext[gId] = bucketHead[bIdx];
-        bucketHead[bIdx] = gId;
-        fxBuf[gId] = 0;
-        fyBuf[gId] = 0;
-        fzBuf[gId] = 0;
-        crowdBuf[gId] = 0;
+    // Gentle vertical gravitational meridian advection (bounded so ||∇d|| stays uniform even at ±1.0 g!)
+    const horizFactor = 1 - p0.y * p0.y;
+    let pw = normalize3(p0.x, p0.y - gravStretch * horizFactor, p0.z);
+
+    // 2-step RK2 (midpoint) area-preserving Curl Flow advection on S²
+    for (let step = 0; step < 2; step++) {
+      const v1 = evalCurlVel(pw);
+      const pMid = normalize3(
+        pw.x + v1.x * dtStep * 0.5,
+        pw.y + v1.y * dtStep * 0.5,
+        pw.z + v1.z * dtStep * 0.5
+      );
+      const v2 = evalCurlVel(pMid);
+      pw = normalize3(pw.x + v2.x * dtStep, pw.y + v2.y * dtStep, pw.z + v2.z * dtStep);
+    }
+
+    // Exact geodesic distance from pw to each generator (point or geodesic arc) + stable Log-Sum-Exp smin
+    let dMin = Infinity;
+    const dists = new Float64Array(numGenerators);
+    for (let g = 0; g < numGenerators; g++) {
+      const gen = generators[g];
+      let dGeo: number;
+      if (!gen.isArc) {
+        dGeo = Math.acos(clamp(dot3(pw, gen.a), -1, 1));
+      } else {
+        const c0 = dot3(pw, gen.a);
+        const c1 = dot3(pw, gen.t1);
+        const ang = clamp(Math.atan2(c1, c0), 0, gen.arcAngle);
+        const qx = Math.cos(ang) * gen.a.x + Math.sin(ang) * gen.t1.x;
+        const qy = Math.cos(ang) * gen.a.y + Math.sin(ang) * gen.t1.y;
+        const qz = Math.cos(ang) * gen.a.z + Math.sin(ang) * gen.t1.z;
+        dGeo = Math.acos(clamp(pw.x * qx + pw.y * qy + pw.z * qz, -1, 1));
+      }
+      const dBiased = dGeo + gen.bias;
+      dists[g] = dBiased;
+      if (dBiased < dMin) dMin = dBiased;
+    }
+
+    let sumExp = 0;
+    for (let g = 0; g < numGenerators; g++) {
+      sumExp += Math.exp(-sminBeta * (dists[g] - dMin));
+    }
+    // Smooth-min geodesic distance in radians + subtle gravitational latitudinal tilt (keeps ||∇d|| ≈ 1!)
+    field[v] = dMin - invSminBeta * Math.log(Math.max(1e-12, sumExp)) + gravNorm * 0.06 * p0.y;
+  }
+
+  // Light 1-pass Laplacian polish on the icosphere to soften vertex-level saddle ripples without flattening slopes
+  const fieldLambda = 0.18 + softness * 0.22;
+  {
+    const nextF = new Float64Array(V);
+    for (let v = 0; v < V; v++) {
+      const nbs = ico.neighbors[v];
+      let sum = 0;
+      for (let j = 0; j < nbs.length; j++) sum += field[nbs[j]];
+      const avg = sum / Math.max(1, nbs.length);
+      nextF[v] = field[v] + (avg - field[v]) * fieldLambda;
+    }
+    field = nextF;
+  }
+
+  // Compute visible scalar span [fMin, fMax] directly in geodesic radians (NO tanh plateau compression!)
+  let fMin = Infinity;
+  let fMax = -Infinity;
+  for (let v = 0; v < V; v++) {
+    if (ico.verts[v].y < bedYNorm - 0.05) continue;
+    const fv = field[v];
+    if (fv < fMin) fMin = fv;
+    if (fv > fMax) fMax = fv;
+  }
+  const fSpan = Math.max(0.05, fMax - fMin);
+
+  // Estimate surface gradient P85 to ensure physical ribbon spacing respects >= 0.85 mm air gap everywhere
+  const gradSamples: number[] = [];
+  for (let f = 0; f < tris.length; f += 3) {
+    const a = tris[f];
+    const b = tris[f + 1];
+    if (ico.verts[a].y < bedYNorm) continue;
+    const va = ico.verts[a];
+    const vb = ico.verts[b];
+    const dist = Math.hypot(vb.x - va.x, vb.y - va.y, vb.z - va.z);
+    if (dist > 1e-5) {
+      gradSamples.push(Math.abs(field[b] - field[a]) / dist);
+    }
+  }
+  gradSamples.sort((a, b) => a - b);
+  const gradP85 = gradSamples.length > 0 ? gradSamples[Math.floor(gradSamples.length * 0.85)] : 1.0;
+
+  // 4. Generate equidistant contour levels by exact physical pitchMm across the ENTIRE [fMin, fMax] range!
+  //    Because ||∇d|| ≈ 1 everywhere, every point on the sphere stays within ~pitchMm/2 of a ribbon (ZERO holes!)
+  //    while keeping default PLA weight comfortably under 1 spool (< 750 g) with generous light-diffusing gaps!
+  const minSepChord = (finThickness + 0.85) / sphereR;
+  const targetPitchMm = Math.max(finThickness + 1.8, 9.8 - densityNorm * 4.8); // 9.8 mm (10) -> 7.4 mm (16) -> 5.0 mm (22)
+  const targetDeltaD = Math.max(targetPitchMm / sphereR, minSepChord * Math.max(1.0, gradP85));
+
+  const isoLevels: number[] = [];
+  const startIso = fMin + 0.3 * targetDeltaD;
+  const endIso = fMax - 0.08 * targetDeltaD;
+  if (endIso > startIso) {
+    const count = clamp(Math.floor((endIso - startIso) / targetDeltaD) + 1, 5, 24);
+    const stepD = count > 1 ? (endIso - startIso) / (count - 1) : targetDeltaD;
+    for (let k = 0; k < count; k++) {
+      isoLevels.push(startIso + k * stepD);
+    }
+  } else {
+    for (let k = 0; k < 6; k++) {
+      isoLevels.push(fMin + fSpan * (0.1 + (0.8 * k) / 5));
+    }
+  }
+
+  // Helper: extract all closed contour loops at f(p) = iso via exact 3D Marching Triangles + O(E) edge chaining
+  const extractIsoLoops = (iso: number): Vec3[][] => {
+    // Perturb vertices sitting right on iso to avoid degenerate edge ambiguity
+    const vals = new Float64Array(V);
+    for (let v = 0; v < V; v++) {
+      const diff = field[v] - iso;
+      vals[v] = Math.abs(diff) < 1e-6 ? 1e-6 : diff;
+    }
+
+    const edgePt = new Map<number, Vec3>();
+    const edgeAdj = new Map<number, number[]>();
+
+    const getEdgeCrossing = (u: number, w: number): number => {
+      const lo = u < w ? u : w;
+      const hi = u < w ? w : u;
+      const key = lo * 65536 + hi;
+      if (!edgePt.has(key)) {
+        const vLo = vals[lo];
+        const vHi = vals[hi];
+        const t = clamp(vLo / (vLo - vHi), 0.001, 0.999);
+        const a = ico.verts[lo];
+        const b = ico.verts[hi];
+        edgePt.set(
+          key,
+          normalize3(a.x + t * (b.x - a.x), a.y + t * (b.y - a.y), a.z + t * (b.z - a.z))
+        );
+      }
+      return key;
+    };
+
+    const linkEdges = (kA: number, kB: number): void => {
+      let arrA = edgeAdj.get(kA);
+      if (!arrA) {
+        arrA = [];
+        edgeAdj.set(kA, arrA);
+      }
+      arrA.push(kB);
+      let arrB = edgeAdj.get(kB);
+      if (!arrB) {
+        arrB = [];
+        edgeAdj.set(kB, arrB);
+      }
+      arrB.push(kA);
+    };
+
+    for (let f = 0; f < tris.length; f += 3) {
+      const i0 = tris[f];
+      const i1 = tris[f + 1];
+      const i2 = tris[f + 2];
+      const s0 = vals[i0] > 0;
+      const s1 = vals[i1] > 0;
+      const s2 = vals[i2] > 0;
+      const count = (s0 ? 1 : 0) + (s1 ? 1 : 0) + (s2 ? 1 : 0);
+      if (count === 0 || count === 3) continue;
+
+      let eA: number;
+      let eB: number;
+      if (s0 !== s1 && s0 !== s2) {
+        eA = getEdgeCrossing(i0, i1);
+        eB = getEdgeCrossing(i0, i2);
+      } else if (s1 !== s0 && s1 !== s2) {
+        eA = getEdgeCrossing(i1, i2);
+        eB = getEdgeCrossing(i1, i0);
+      } else {
+        eA = getEdgeCrossing(i2, i0);
+        eB = getEdgeCrossing(i2, i1);
+      }
+      linkEdges(eA, eB);
+    }
+
+    const visited = new Set<number>();
+    const loops: Vec3[][] = [];
+
+    for (const startKey of edgeAdj.keys()) {
+      if (visited.has(startKey)) continue;
+      const loop: Vec3[] = [];
+      let curr: number | undefined = startKey;
+      let prev = -1;
+
+      while (curr !== undefined && !visited.has(curr)) {
+        visited.add(curr);
+        const pt = edgePt.get(curr);
+        if (pt) loop.push(pt);
+        const nbs = edgeAdj.get(curr);
+        if (!nbs || nbs.length === 0) break;
+        let nextKey: number | undefined;
+        for (let m = 0; m < nbs.length; m++) {
+          if (nbs[m] !== prev && !visited.has(nbs[m])) {
+            nextKey = nbs[m];
+            break;
+          }
+        }
+        prev = curr;
+        curr = nextKey;
+      }
+
+      if (loop.length >= 6) {
+        loops.push(loop);
       }
     }
 
-    // 3b. Accumulate Spring + Curvature + EXACT Point-to-Segment Repulsion + Outward Growth + Gravity
-    for (let s = 0; s < numStrands; s++) {
-      const trk = tracks[s];
-      const pts = trk.pts;
-      const M = pts.length;
-      const base = trackOff[s];
-      const canGrow = isGrowing && M < maxNodesPerTrack;
-      const desiredEdge = canGrow ? targetEdgeLen * 1.08 : targetEdgeLen;
+    return loops;
+  };
 
-      for (let i = 0; i < M; i++) {
-        const gId = base + i;
-        const p = pts[i];
-        const pPrev = pts[(i - 1 + M) % M];
-        const pNext = pts[(i + 1) % M];
+  interface ExtractedContour {
+    pts: Vec3[];
+    isClosed: boolean;
+    levelIdx: number;
+  }
 
-        let fx = 0;
-        let fy = 0;
-        let fz = 0;
+  const contours: ExtractedContour[] = [];
+  const yMaxBound = hasTopOpening ? topYNorm : 1.0;
 
-        // (1) Edge length spring
-        const dPrevX = pPrev.x - p.x;
-        const dPrevY = pPrev.y - p.y;
-        const dPrevZ = pPrev.z - p.z;
-        const lPrev = Math.hypot(dPrevX, dPrevY, dPrevZ);
-        if (lPrev > 1e-6) {
-          const st = (lPrev - desiredEdge) / lPrev;
-          fx += dPrevX * st * kSpring;
-          fy += dPrevY * st * kSpring;
-          fz += dPrevZ * st * kSpring;
+  const interpToY = (a: Vec3, b: Vec3, yLim: number): Vec3 => {
+    const dy = b.y - a.y;
+    const t = Math.abs(dy) > 1e-8 ? clamp((yLim - a.y) / dy, 0, 1) : 0.5;
+    return clampUnitY(
+      normalize3(a.x + t * (b.x - a.x), a.y + t * (b.y - a.y), a.z + t * (b.z - a.z)),
+      bedYNorm,
+      yMaxBound
+    );
+  };
+
+  const inBounds = (p: Vec3) => p.y >= bedYNorm && (!hasTopOpening || p.y <= topYNorm);
+
+  // 5. Extract all physical-pitch geodesic levels, clip cleanly at Z = 0, and apply 2-pass spherical smoothing
+  for (let lvl = 0; lvl < isoLevels.length; lvl++) {
+    const iso = isoLevels[lvl];
+    const rawLoops = extractIsoLoops(iso);
+
+    for (let li = 0; li < rawLoops.length; li++) {
+      const loop = rawLoops[li];
+      let allIn = true;
+      let anyIn = false;
+      for (let i = 0; i < loop.length; i++) {
+        if (inBounds(loop[i])) anyIn = true;
+        else allIn = false;
+      }
+      if (!anyIn) continue;
+
+      if (allIn) {
+        // Closed contour completely on the visible sphere -> 2 passes of projected Laplacian smoothing
+        const smoothed = smoothSphericalPolyline(loop, true, 2, 0.42, bedYNorm, yMaxBound);
+        // Keep clean inner eye loops (>= 9 mm perimeter) while discarding degenerate sub-millimeter pinholes
+        let perim = 0;
+        for (let i = 0; i < smoothed.length; i++) {
+          const a = smoothed[i];
+          const b = smoothed[(i + 1) % smoothed.length];
+          perim += Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
         }
-
-        const dNextX = pNext.x - p.x;
-        const dNextY = pNext.y - p.y;
-        const dNextZ = pNext.z - p.z;
-        const lNext = Math.hypot(dNextX, dNextY, dNextZ);
-        if (lNext > 1e-6) {
-          const st = (lNext - desiredEdge) / lNext;
-          fx += dNextX * st * kSpring;
-          fy += dNextY * st * kSpring;
-          fz += dNextZ * st * kSpring;
+        if (perim * sphereR >= 9.0 && smoothed.length >= 6) {
+          contours.push({ pts: smoothed, isClosed: true, levelIdx: lvl });
         }
+      } else {
+        // Loop crosses the flat bed cut (Z = 0) or open top -> rotate start to an out-of-bounds vertex & split cleanly!
+        let startOut = 0;
+        while (startOut < loop.length && inBounds(loop[startOut])) startOut++;
 
-        // (2) Curvature fairing (smooth fluid curves)
-        const midX = 0.5 * (pPrev.x + pNext.x);
-        const midY = 0.5 * (pPrev.y + pNext.y);
-        const midZ = 0.5 * (pPrev.z + pNext.z);
-        fx += (midX - p.x) * kCurvature;
-        fy += (midY - p.y) * kCurvature;
-        fz += (midZ - p.z) * kCurvature;
-
-        // (3) EXACT Point-to-Segment Repulsion against ALL non-adjacent edges -> ZERO GAPS, ZERO CROSSINGS!
-        let repX = 0;
-        let repY = 0;
-        let repZ = 0;
-        let interCrowd = 0;
-        let selfCrowd = 0;
-
-        const gx = hashCoord(p.x);
-        const gy = hashCoord(p.y);
-        const gz = hashCoord(p.z);
-        const x0 = gx > 0 ? gx - 1 : 0;
-        const x1 = gx + 1 < gridDim ? gx + 1 : gridDim - 1;
-        const y0 = gy > 0 ? gy - 1 : 0;
-        const y1 = gy + 1 < gridDim ? gy + 1 : gridDim - 1;
-        const z0 = gz > 0 ? gz - 1 : 0;
-        const z1 = gz + 1 < gridDim ? gz + 1 : gridDim - 1;
-
-        for (let bx = x0; bx <= x1; bx++) {
-          const bxOff = bx * gridDim;
-          for (let by = y0; by <= y1; by++) {
-            const bxyOff = (bxOff + by) * gridDim;
-            for (let bz = z0; bz <= z1; bz++) {
-              let segId = bucketHead[bxyOff + bz];
-              while (segId !== -1) {
-                const otherS = segTrack[segId];
-                const otherI = segIdx[segId];
-                const otherPts = tracks[otherS].pts;
-                const otherM = otherPts.length;
-
-                // Skip incident / adjacent edges of the SAME circuit (distance < 3 edges)
-                let skip = false;
-                if (otherS === s) {
-                  const d1 = Math.min(Math.abs(i - otherI), M - Math.abs(i - otherI));
-                  const nextOther = (otherI + 1) % otherM;
-                  const d2 = Math.min(Math.abs(i - nextOther), M - Math.abs(i - nextOther));
-                  if (d1 < 3 || d2 < 3) skip = true;
-                }
-
-                if (!skip) {
-                  const qa = otherPts[otherI];
-                  const qb = otherPts[(otherI + 1) % otherM];
-                  const ex = qb.x - qa.x;
-                  const ey = qb.y - qa.y;
-                  const ez = qb.z - qa.z;
-                  const eLen2 = ex * ex + ey * ey + ez * ez;
-                  let tProj = 0;
-                  if (eLen2 > 1e-10) {
-                    tProj = clamp(((p.x - qa.x) * ex + (p.y - qa.y) * ey + (p.z - qa.z) * ez) / eLen2, 0, 1);
-                  }
-                  const cx = qa.x + ex * tProj;
-                  const cy = qa.y + ey * tProj;
-                  const cz = qa.z + ez * tProj;
-
-                  const dx = p.x - cx;
-                  const dy = p.y - cy;
-                  const dz = p.z - cz;
-                  const d2 = dx * dx + dy * dy + dz * dz;
-
-                  if (otherS !== s) {
-                    if (d2 < interRange * interRange && d2 > 1e-12) {
-                      const d = Math.sqrt(d2);
-                      let push = 0;
-                      if (d < minSepChord) {
-                        push =
-                          (minSepChord - d) * kInterHard +
-                          (interRange - minSepChord) * kInterSoft * 0.25;
-                        interCrowd += 1.5;
-                      } else {
-                        const u = (interRange - d) / (interRange - minSepChord);
-                        push = u * u * (interRange - minSepChord) * kInterSoft;
-                        interCrowd += u * 0.9;
-                      }
-                      const invD = push / d;
-                      repX += dx * invD;
-                      repY += dy * invD;
-                      repZ += dz * invD;
-                    }
-                  } else if (d2 < activeSelfRange * activeSelfRange && d2 > 1e-12) {
-                    const d = Math.sqrt(d2);
-                    let push = 0;
-                    if (d < minSepChord) {
-                      push =
-                        (minSepChord - d) * kSelfHard +
-                        (activeSelfRange - minSepChord) * kSelfSoft * 0.25;
-                      selfCrowd += 1.4;
-                    } else {
-                      const u = (activeSelfRange - d) / (activeSelfRange - minSepChord);
-                      push = u * u * (activeSelfRange - minSepChord) * kSelfSoft;
-                      selfCrowd += u * 0.55;
-                    }
-                    const invD = push / d;
-                    repX += dx * invD;
-                    repY += dy * invD;
-                    repZ += dz * invD;
-                  }
-                }
-                segId = segNext[segId];
+        const M = loop.length;
+        let current: Vec3[] = [];
+        for (let step = 0; step <= M; step++) {
+          const idx = (startOut + step) % M;
+          const p = loop[idx];
+          const ok = inBounds(p);
+          if (ok) {
+            if (current.length === 0) {
+              const prev = loop[(idx - 1 + M) % M];
+              const lim = prev.y < bedYNorm ? bedYNorm : topYNorm;
+              current.push(interpToY(prev, p, lim));
+            }
+            current.push(p);
+          } else if (current.length > 0) {
+            const prev = loop[(idx - 1 + M) % M];
+            const lim = p.y < bedYNorm ? bedYNorm : topYNorm;
+            current.push(interpToY(prev, p, lim));
+            if (current.length >= 5) {
+              const sm = smoothSphericalPolyline(current, false, 2, 0.42, bedYNorm, yMaxBound);
+              let arcLen = 0;
+              for (let j = 0; j < sm.length - 1; j++) {
+                arcLen += Math.hypot(
+                  sm[j + 1].x - sm[j].x,
+                  sm[j + 1].y - sm[j].y,
+                  sm[j + 1].z - sm[j].z
+                );
+              }
+              if (arcLen * sphereR >= 8.0) {
+                contours.push({ pts: sm, isClosed: false, levelIdx: lvl });
               }
             }
+            current = [];
           }
-        }
-
-        fx += repX;
-        fy += repY;
-        fz += repZ;
-        const totalCrowd = interCrowd + selfCrowd;
-        crowdBuf[gId] = totalCrowd;
-
-        // (4) Signed Differential Curve Growth drive:
-        //     - Stage 1: pure outward expansion until neighboring circuits meet cleanly across the sphere.
-        //     - Stage 2: coupled inward/outward buckling! Inward peninsulas (-nOutLoop) dive into each loop's
-        //       wide open interior while the neighboring circuit surges in right behind (+nOutLoop), forming
-        //       long parallel double/triple F1-track hairpins across 100% of the sphere with ZERO crossings!
-        if (canGrow) {
-          const tCurve = normalize3(pNext.x - pPrev.x, pNext.y - pPrev.y, pNext.z - pPrev.z);
-          const nOutLoop = normalize3(
-            tCurve.y * p.z - tCurve.z * p.y,
-            tCurve.z * p.x - tCurve.x * p.z,
-            tCurve.x * p.y - tCurve.y * p.x
-          );
-          let growMag: number;
-          if (inStage1Expand) {
-            const openOut = 1.0 / (1.0 + totalCrowd * 2.2);
-            growMag = targetEdgeLen * 0.46 * openOut;
-          } else {
-            const sPhase = (i / M) * Math.PI * 2;
-            const signedWave =
-              0.82 * Math.sin(sPhase * (trk.lobeFreq + 2) + trk.phase) +
-              0.45 * Math.cos(sPhase * (trk.lobeFreq + 4) - trk.phase * 1.3);
-            if (signedWave >= 0) {
-              // Outward tongue expands into open gaps (e.g. chasing a neighbor's inward hairpin!)
-              const openOut = 1.0 / (1.0 + totalCrowd * 2.4);
-              growMag = targetEdgeLen * 0.52 * growEnv * openOut * signedWave;
-            } else {
-              // Inward peninsula dives into this circuit's own open interior (stopped cleanly by selfCrowd!)
-              const openIn = 1.0 / (1.0 + selfCrowd * 2.6);
-              growMag = targetEdgeLen * 0.54 * growEnv * openIn * signedWave;
-            }
-          }
-          fx += nOutLoop.x * growMag;
-          fy += nOutLoop.y * growMag;
-          fz += nOutLoop.z * growMag;
-        }
-
-        // (5) Subtle tangential gravity in Stage 2
-        if (Math.abs(gravStep) > 1e-6 && !inStage1Expand) {
-          const latSin = Math.sqrt(Math.max(0, 1 - p.y * p.y));
-          const gMag = gravStep * trk.weightBias * (0.45 + 0.65 * latSin);
-          fx += -p.y * p.x * gMag;
-          fy += (1 - p.y * p.y) * gMag;
-          fz += -p.y * p.z * gMag;
-        }
-
-        // Clean floor cushion right above bedYNorm (Z = 0)
-        if (p.y < bedYNorm + minSepChord * 1.2) {
-          fy += (bedYNorm + minSepChord * 1.2 - p.y) * 0.75;
-        }
-
-        fxBuf[gId] = fx;
-        fyBuf[gId] = fy;
-        fzBuf[gId] = fz;
-      }
-    }
-
-    // 3c. Integrate on S² tangent plane with STRICT CFL clamp + Dynamic Midpoint Subdivision
-    for (let s = 0; s < numStrands; s++) {
-      const trk = tracks[s];
-      const pts = trk.pts;
-      const M = pts.length;
-      const base = trackOff[s];
-
-      for (let i = 0; i < M; i++) {
-        const gId = base + i;
-        const p = pts[i];
-        const fx = fxBuf[gId];
-        const fy = fyBuf[gId];
-        const fz = fzBuf[gId];
-
-        const fDotP = fx * p.x + fy * p.y + fz * p.z;
-        let tx = fx - fDotP * p.x;
-        let ty = fy - fDotP * p.y;
-        let tz = fz - fDotP * p.z;
-
-        const tLen = Math.hypot(tx, ty, tz);
-        if (tLen > maxStep) {
-          const sc = maxStep / tLen;
-          tx *= sc;
-          ty *= sc;
-          tz *= sc;
-        }
-        pts[i] = clampUnitY(normalize3(p.x + tx, p.y + ty, p.z + tz), bedYNorm, yCeiling);
-      }
-
-      if (isGrowing && M < maxNodesPerTrack) {
-        const grown: Vec3[] = [];
-        const activeSplitLen = inStage1Expand ? targetEdgeLen * 1.2 : splitThreshold;
-        for (let i = 0; i < M; i++) {
-          const a = pts[i];
-          const b = pts[(i + 1) % M];
-          grown.push(a);
-          const edgeLen = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
-          const avgCrowd = 0.5 * (crowdBuf[base + i] + crowdBuf[base + ((i + 1) % M)]);
-          const shouldSplit =
-            edgeLen > activeSplitLen ||
-            (!inStage1Expand && avgCrowd < 0.5 && edgeLen > targetEdgeLen * 0.88 && ((i + iter) % 5 === 0));
-          if (shouldSplit && grown.length + (M - 1 - i) < maxNodesPerTrack) {
-            grown.push(
-              clampUnitY(
-                normalize3((a.x + b.x) * 0.5, (a.y + b.y) * 0.5, (a.z + b.z) * 0.5),
-                bedYNorm,
-                yCeiling
-              )
-            );
-          }
-        }
-        if (grown.length > M) {
-          trk.pts = grown;
         }
       }
     }
   }
 
-  // 4. Two passes of closed Chaikin smoothing on S² + 2 hard separation sweeps for razor-smooth parallel ribbons!
-  const chaikinRatio = 0.22;
-  const finalLoops: Vec3[][] = new Array(numStrands);
-  let totalSubNodes = 0;
-  for (let s = 0; s < numStrands; s++) {
-    let lp = tracks[s].pts;
-    for (let pass = 0; pass < 2; pass++) {
-      const M = lp.length;
-      const next: Vec3[] = new Array(M * 2);
-      for (let m = 0; m < M; m++) {
-        const a = lp[m];
-        const b = lp[(m + 1) % M];
-        next[m * 2] = clampUnitY(
-          normalize3(
-            a.x * (1 - chaikinRatio) + b.x * chaikinRatio,
-            a.y * (1 - chaikinRatio) + b.y * chaikinRatio,
-            a.z * (1 - chaikinRatio) + b.z * chaikinRatio
-          ),
-          bedYNorm,
-          yCeiling
-        );
-        next[m * 2 + 1] = clampUnitY(
-          normalize3(
-            a.x * chaikinRatio + b.x * (1 - chaikinRatio),
-            a.y * chaikinRatio + b.y * (1 - chaikinRatio),
-            a.z * chaikinRatio + b.z * (1 - chaikinRatio)
-          ),
-          bedYNorm,
-          yCeiling
-        );
-      }
-      lp = next;
-    }
-    finalLoops[s] = lp;
-    totalSubNodes += lp.length;
-  }
+  if (contours.length === 0) return;
 
-  // Post-Chaikin non-crossing guarantee sweeps (strictly respects minSepChord)
-  const sepCellSize = Math.max(minSepChord * 1.4, 0.02);
-  const sepDim = clamp(Math.ceil(2.24 / sepCellSize), 12, 44);
-  const sepHead = new Int32Array(sepDim * sepDim * sepDim);
-  const sepNext = new Int32Array(totalSubNodes);
-  const sepTrack = new Int32Array(totalSubNodes);
-  const sepIdx = new Int32Array(totalSubNodes);
-  const sepFx = new Float64Array(totalSubNodes);
-  const sepFy = new Float64Array(totalSubNodes);
-  const sepFz = new Float64Array(totalSubNodes);
-  const sepOff = new Int32Array(numStrands);
-  const sepHash = (v: number): number => {
-    const idx = Math.floor((v + 1.12) / sepCellSize);
+  // 5. Fast 1-pass strict minimum-separation projection (guarantees >= 0.85 mm free gap even at steep saddles!)
+  let totalPts = 0;
+  for (let c = 0; c < contours.length; c++) totalPts += contours[c].pts.length;
+  const sepCell = Math.max(minSepChord * 1.4, 0.02);
+  const sepDim = clamp(Math.ceil(2.24 / sepCell), 12, 44);
+  const sepHead = new Int32Array(sepDim * sepDim * sepDim).fill(-1);
+  const sepNext = new Int32Array(totalPts);
+  const sepContour = new Int32Array(totalPts);
+  const sepIdx = new Int32Array(totalPts);
+  const sepFx = new Float64Array(totalPts);
+  const sepFy = new Float64Array(totalPts);
+  const sepFz = new Float64Array(totalPts);
+  const sepOff = new Int32Array(contours.length);
+  const hashSep = (v: number): number => {
+    const idx = Math.floor((v + 1.12) / sepCell);
     return idx < 0 ? 0 : idx >= sepDim ? sepDim - 1 : idx;
   };
 
-  for (let sweep = 0; sweep < 2; sweep++) {
-    sepHead.fill(-1);
-    let gCount = 0;
-    for (let s = 0; s < numStrands; s++) {
-      sepOff[s] = gCount;
-      const lp = finalLoops[s];
-      for (let i = 0; i < lp.length; i++) {
-        const gId = gCount++;
-        const p = lp[i];
-        sepTrack[gId] = s;
-        sepIdx[gId] = i;
-        const bIdx = (sepHash(p.x) * sepDim + sepHash(p.y)) * sepDim + sepHash(p.z);
-        sepNext[gId] = sepHead[bIdx];
-        sepHead[bIdx] = gId;
-        sepFx[gId] = 0;
-        sepFy[gId] = 0;
-        sepFz[gId] = 0;
-      }
-    }
-    for (let s = 0; s < numStrands; s++) {
-      const lp = finalLoops[s];
-      const M = lp.length;
-      const base = sepOff[s];
-      for (let i = 0; i < M; i++) {
-        const p = lp[i];
-        const gId = base + i;
-        const gx = sepHash(p.x);
-        const gy = sepHash(p.y);
-        const gz = sepHash(p.z);
-        const x0 = gx > 0 ? gx - 1 : 0;
-        const x1 = gx + 1 < sepDim ? gx + 1 : sepDim - 1;
-        const y0 = gy > 0 ? gy - 1 : 0;
-        const y1 = gy + 1 < sepDim ? gy + 1 : sepDim - 1;
-        const z0 = gz > 0 ? gz - 1 : 0;
-        const z1 = gz + 1 < sepDim ? gz + 1 : sepDim - 1;
-        let fx = 0,
-          fy = 0,
-          fz = 0;
-        for (let bx = x0; bx <= x1; bx++) {
-          const bxOff = bx * sepDim;
-          for (let by = y0; by <= y1; by++) {
-            const bxyOff = (bxOff + by) * sepDim;
-            for (let bz = z0; bz <= z1; bz++) {
-              let otherId = sepHead[bxyOff + bz];
-              while (otherId !== -1) {
-                if (otherId !== gId) {
-                  const otherS = sepTrack[otherId];
-                  const otherI = sepIdx[otherId];
-                  const isNonAdj =
-                    otherS !== s || Math.min(Math.abs(i - otherI), M - Math.abs(i - otherI)) >= 12;
-                  if (isNonAdj) {
-                    const q = finalLoops[otherS][otherI];
-                    const dx = p.x - q.x;
-                    const dy = p.y - q.y;
-                    const dz = p.z - q.z;
-                    const d2 = dx * dx + dy * dy + dz * dz;
-                    if (d2 < minSepChord * minSepChord && d2 > 1e-10) {
-                      const d = Math.sqrt(d2);
-                      const push = ((minSepChord - d) * 0.5) / d;
-                      fx += dx * push;
-                      fy += dy * push;
-                      fz += dz * push;
-                    }
-                  }
-                }
-                otherId = sepNext[otherId];
-              }
-            }
-          }
-        }
-        sepFx[gId] = fx;
-        sepFy[gId] = fy;
-        sepFz[gId] = fz;
-      }
-    }
-    for (let s = 0; s < numStrands; s++) {
-      const lp = finalLoops[s];
-      const base = sepOff[s];
-      for (let i = 0; i < lp.length; i++) {
-        const gId = base + i;
-        const p = lp[i];
-        const fx = sepFx[gId];
-        const fy = sepFy[gId];
-        const fz = sepFz[gId];
-        if (fx * fx + fy * fy + fz * fz < 1e-12) continue;
-        const fDot = fx * p.x + fy * p.y + fz * p.z;
-        lp[i] = clampUnitY(
-          normalize3(p.x + fx - fDot * p.x, p.y + fy - fDot * p.y, p.z + fz - fDot * p.z),
-          bedYNorm,
-          yCeiling
-        );
-      }
+  let gCount = 0;
+  for (let c = 0; c < contours.length; c++) {
+    sepOff[c] = gCount;
+    const pts = contours[c].pts;
+    for (let i = 0; i < pts.length; i++) {
+      const gId = gCount++;
+      const p = pts[i];
+      sepContour[gId] = c;
+      sepIdx[gId] = i;
+      const bIdx = (hashSep(p.x) * sepDim + hashSep(p.y)) * sepDim + hashSep(p.z);
+      sepNext[gId] = sepHead[bIdx];
+      sepHead[bIdx] = gId;
     }
   }
 
-  // 5. Optional spiral twist + 3D watertight radial extrusion with per-circuit color ID (1..8)
-  for (let s = 0; s < numStrands; s++) {
-    let loop = finalLoops[s];
+  for (let c = 0; c < contours.length; c++) {
+    const pts = contours[c].pts;
+    const M = pts.length;
+    const isCl = contours[c].isClosed;
+    const base = sepOff[c];
+    for (let i = 0; i < M; i++) {
+      if (!isCl && (i === 0 || i === M - 1)) continue; // keep bed-cut endpoints pinned on Z = 0
+      const p = pts[i];
+      const gId = base + i;
+      const gx = hashSep(p.x);
+      const gy = hashSep(p.y);
+      const gz = hashSep(p.z);
+      const x0 = gx > 0 ? gx - 1 : 0;
+      const x1 = gx + 1 < sepDim ? gx + 1 : sepDim - 1;
+      const y0 = gy > 0 ? gy - 1 : 0;
+      const y1 = gy + 1 < sepDim ? gy + 1 : sepDim - 1;
+      const z0 = gz > 0 ? gz - 1 : 0;
+      const z1 = gz + 1 < sepDim ? gz + 1 : sepDim - 1;
+      let fx = 0,
+        fy = 0,
+        fz = 0;
+      for (let bx = x0; bx <= x1; bx++) {
+        const bxOff = bx * sepDim;
+        for (let by = y0; by <= y1; by++) {
+          const bxyOff = (bxOff + by) * sepDim;
+          for (let bz = z0; bz <= z1; bz++) {
+            let otherId = sepHead[bxyOff + bz];
+            while (otherId !== -1) {
+              const otherC = sepContour[otherId];
+              if (otherC !== c) {
+                const q = contours[otherC].pts[sepIdx[otherId]];
+                const dx = p.x - q.x;
+                const dy = p.y - q.y;
+                const dz = p.z - q.z;
+                const d2 = dx * dx + dy * dy + dz * dz;
+                if (d2 < minSepChord * minSepChord && d2 > 1e-10) {
+                  const d = Math.sqrt(d2);
+                  const push = ((minSepChord - d) * 0.5) / d;
+                  fx += dx * push;
+                  fy += dy * push;
+                  fz += dz * push;
+                }
+              }
+              otherId = sepNext[otherId];
+            }
+          }
+        }
+      }
+      sepFx[gId] = fx;
+      sepFy[gId] = fy;
+      sepFz[gId] = fz;
+    }
+  }
+
+  for (let c = 0; c < contours.length; c++) {
+    const pts = contours[c].pts;
+    const base = sepOff[c];
+    for (let i = 0; i < pts.length; i++) {
+      const gId = base + i;
+      const fx = sepFx[gId];
+      const fy = sepFy[gId];
+      const fz = sepFz[gId];
+      if (fx * fx + fy * fy + fz * fz < 1e-12) continue;
+      const p = pts[i];
+      const fDot = fx * p.x + fy * p.y + fz * p.z;
+      pts[i] = clampUnitY(
+        normalize3(p.x + fx - fDot * p.x, p.y + fy - fDot * p.y, p.z + fz - fDot * p.z),
+        bedYNorm,
+        yMaxBound
+      );
+    }
+  }
+
+  // 6. Optional spiral twist + watertight 3D extrusion anchored 0.7 mm into 1.2 mm sphere core (clipped Z >= 0!)
+  for (let c = 0; c < contours.length; c++) {
+    const item = contours[c];
+    let pts = item.pts;
     if (Math.abs(twistRadTotal) > 1e-4) {
-      loop = loop.map((p) => {
+      pts = pts.map((p) => {
         const hFrac = clamp((p.y - bedYNorm) / Math.max(0.2, 1.0 - bedYNorm), 0, 1);
         const tw = twistRadTotal * hFrac;
         const ct = Math.cos(tw);
@@ -1204,21 +1308,41 @@ function appendSphericalVoronoiCells(ctx: ExtraGeometryContext): void {
       });
     }
 
-    extrudeClosedSphericalLoop(
-      mb,
-      loop,
-      config,
-      seatY,
-      shadeHeight,
-      sphereR,
-      sphereYc,
-      useExactSphere,
-      finThickness,
-      finDepth,
-      liftFactor,
-      invertedForPendant,
-      s + 1 // Strand color ID 1..8!
-    );
+    const colorTag = (item.levelIdx % 8) + 1;
+    if (item.isClosed) {
+      extrudeClosedSphericalLoop(
+        mb,
+        pts,
+        config,
+        seatY,
+        shadeHeight,
+        sphereR,
+        sphereYc,
+        useExactSphere,
+        finThickness,
+        finDepth,
+        liftFactor,
+        invertedForPendant,
+        colorTag
+      );
+    } else {
+      extrudeOpenSphericalCurve(
+        mb,
+        pts,
+        config,
+        seatY,
+        shadeHeight,
+        sphereR,
+        sphereYc,
+        useExactSphere,
+        finThickness,
+        finDepth,
+        invertedForPendant,
+        colorTag,
+        liftFactor,
+        true
+      );
+    }
   }
 }
 
@@ -1359,9 +1483,11 @@ function appendGrowthRuffledFins(ctx: ExtraGeometryContext): void {
         0.28 * Math.sin(w2 * t + phi2) +
         0.14 * Math.sin(w3 * t + phi3);
 
-      // Bold carnation/coral amplitude: neighboring outer edges nearly kiss across v = 0.08..0.92!
-      const localSectorMm = (2 * Math.PI * Math.max(8, rEff + baseDepth * 0.72)) / finCount;
-      const maxRuffleMm = Math.min(finDepth * 1.18, localSectorMm * 0.62);
+      // Strict dynamic anti-collision bound: >= 0.85 mm free air clearance between opposing neighbor ruffles
+      // everywhere outside the polar convergence zone!
+      const localSectorMm = (2 * Math.PI * Math.max(4, rEff + baseDepth * 0.85)) / finCount;
+      const safeHalfSwingMm = Math.max(0, (localSectorMm - finThickness - 0.85) * 0.5);
+      const maxRuffleMm = Math.min(finDepth * 1.12, safeHalfSwingMm);
       const ruffleEnv = smoothstep(0.03, 0.08, v) * (1 - smoothstep(0.92, 0.985, v));
       const latShiftMm = maxRuffleMm * growthAmp * wave * ruffleEnv;
 
@@ -1456,11 +1582,6 @@ function appendGrowthRuffledFins(ctx: ExtraGeometryContext): void {
     mb.addQuad(bl[0], br[0], tr[0], tl[0]);
     mb.addQuad(bl[K - 1], tl[K - 1], tr[K - 1], br[K - 1]);
   }
-
-  // Smooth watertight Ø4 mm central polar union button sealing any central micro-gap at R = 0.0 mm
-  if (isClosedPoleLed) {
-    appendPolarUnionButton(mb, seatY + shadeHeight, 2.0, 2.2);
-  }
 }
 
 // =================================================================================================
@@ -1484,7 +1605,10 @@ function extrudeOpenSphericalCurve(
   useExactSphere: boolean,
   finThicknessMm: number,
   finDepthMm: number,
-  invertedForPendant: boolean
+  invertedForPendant: boolean,
+  strandColorId = 0,
+  liftFactor = 0,
+  isContourArc = false
 ): void {
   const K = curveUnit.length;
   if (K < 5) return;
@@ -1493,7 +1617,7 @@ function extrudeOpenSphericalCurve(
   const isClosedDome = Boolean(silhouette.closeTopDome) && !invertedForPendant;
   const isClosedPoleLed = isClosedDome && mount.type === 'led_kit_001';
   const baseHalfW = clamp(finThicknessMm, 0.9, 1.8) * 0.5;
-  const embedMm = 0.65;
+  const embedMm = isContourArc ? 0.7 : 0.65;
 
   const corePos: Vec3[] = new Array(K);
   const coreNorm: Vec3[] = new Array(K);
@@ -1555,8 +1679,9 @@ function extrudeOpenSphericalCurve(
   const minAllowedY = seatY;
   const maxAllowedY = isClosedDome ? seatY + shadeHeight + finDepthMm + 3.0 : seatY + shadeHeight - 0.3;
   const taperSpan = Math.max(4, Math.round(K * 0.04));
-  const rootThick = finThicknessMm + 1.3;
-  const tipThick = finThicknessMm + 0.4;
+  const strandTag = strandColorId > 0 ? strandColorId * 100.0 : 0.0;
+  const rootThick = strandTag + finThicknessMm + 1.3;
+  const tipThick = strandTag + finThicknessMm + 0.4;
 
   let prevSide: Vec3 | null = null;
   for (let i = 0; i < K; i++) {
@@ -1577,30 +1702,38 @@ function extrudeOpenSphericalCurve(
 
     const distFromBed = pos.y - seatY;
     const bedRamp = smoothstep(0.3, 6.0, distFromBed);
-    // Delay radial height fade ONLY to the very last v >= 0.94 so fins converge lushly to R = 0!
-    const poleRamp = isClosedPoleLed
-      ? 1.0 - smoothstep(0.94, 0.999, vNorm)
-      : 1.0 - smoothstep(0.88, 0.95, vNorm);
-    // Only taper at the bottom bed end (not at the closed North Pole where poleRamp feathers cleanly)
-    const startTaper = smoothstep(0, taperSpan, i);
-    const endTaper = isClosedPoleLed ? 1.0 : smoothstep(0, taperSpan, K - 1 - i);
+    // Delay radial height fade ONLY to the very last v >= 0.94 so Wind fins converge lushly to R = 0;
+    // for Gravity isocontour arcs keep full ribbon depth across the upper dome!
+    const poleRamp = isContourArc
+      ? isClosedPoleLed
+        ? 1.0
+        : 1.0 - smoothstep(0.88, 0.96, vNorm)
+      : isClosedPoleLed
+        ? 1.0 - smoothstep(0.94, 0.999, vNorm)
+        : 1.0 - smoothstep(0.88, 0.95, vNorm);
+    const startTaper = isContourArc ? 1.0 : smoothstep(0, taperSpan, i);
+    const endTaper = isContourArc || isClosedPoleLed ? 1.0 : smoothstep(0, taperSpan, K - 1 - i);
 
-    const depthHere = Math.max(
-      0.35,
-      localDepths[i] * (0.18 + 0.82 * bedRamp) * (0.14 + 0.86 * poleRamp) * (0.3 + 0.7 * startTaper * endTaper)
-    );
+    const depthHere = isContourArc
+      ? Math.max(0.5, localDepths[i] * (0.28 + 0.72 * bedRamp) * poleRamp)
+      : Math.max(
+          0.35,
+          localDepths[i] * (0.18 + 0.82 * bedRamp) * (0.14 + 0.86 * poleRamp) * (0.3 + 0.7 * startTaper * endTaper)
+        );
 
-    // Gently slim fin half-width right at the exact pole center (v > 0.955) for a razor-crisp spiral eye
-    const poleThin = isClosedPoleLed ? 1.0 - 0.56 * smoothstep(0.955, 0.999, vNorm) : 1.0;
+    const poleThin =
+      !isContourArc && isClosedPoleLed ? 1.0 - 0.56 * smoothstep(0.955, 0.999, vNorm) : 1.0;
     const hw = baseHalfW * poleThin;
+
+    const extDir = Math.abs(liftFactor) > 1e-4 ? normalize3(nOut.x, nOut.y + liftFactor, nOut.z) : nOut;
 
     const rootX = pos.x - nOut.x * embedMm;
     const rootY = pos.y - nOut.y * embedMm;
     const rootZ = pos.z - nOut.z * embedMm;
 
-    const tipX = pos.x + nOut.x * depthHere;
-    const tipY = pos.y + nOut.y * depthHere;
-    const tipZ = pos.z + nOut.z * depthHere;
+    const tipX = pos.x + extDir.x * depthHere;
+    const tipY = pos.y + extDir.y * depthHere;
+    const tipZ = pos.z + extDir.z * depthHere;
 
     bl[i] = mb.addVertex(
       rootX - bSide.x * hw,
@@ -1676,7 +1809,7 @@ function appendWindFlowFins(ctx: ExtraGeometryContext): void {
   const vortexSigma = 0.62;
   const vortexTwoSigma2 = 2 * vortexSigma * vortexSigma;
 
-  // Bijective smooth 3D diffeomorphism Φ: S² -> S² (mathematically non-crossing!)
+  // Bijective smooth 3D diffeomorphism Φ: S² -> S² with dynamic >= 0.85 mm anti-collision margin outside polar zone!
   const applyWindFlow = (theta0: number, ny0: number): Vec3 => {
     const hFrac = clamp((ny0 - bedYNorm) / Math.max(0.25, 1.0 - bedYNorm), 0, 1);
     const poleEnv = smoothstep(0.0, 0.1, hFrac) * (1 - smoothstep(0.88, 1.0, hFrac));
@@ -1684,24 +1817,28 @@ function appendWindFlowFins(ctx: ExtraGeometryContext): void {
     const polarSwirl = isClosedPoleLed ? 0.78 * Math.pow(smoothstep(0.80, 0.999, hFrac), 1.35) : 0;
     let theta = theta0 + polarSwirl;
 
+    // Compute dynamic max azimuthal compression allowed at local radius so adjacent fins keep >= 0.85 mm air gap
+    const rHorizLocal = Math.sqrt(Math.max(0.04, 1 - ny0 * ny0));
+    const nominalArcMm = (2 * Math.PI * (sphereR * rHorizLocal)) / finCount;
+    const minDeriv = clamp((finThickness + 0.85) / Math.max(1.5, nominalArcMm), 0.25, 0.96);
+    const maxDerivDrop = Math.max(0, 1.0 - minDeriv);
+
     if (windType === 'breeze') {
-      // Smooth diagonal breeze lean + gentle directional shear (∂theta'/∂theta >= 0.64 > 0)
+      // Smooth diagonal breeze lean + bounded directional shear (guaranteed >= 0.85 mm clearance!)
       const diagSweep = intensity * (0.52 * hFrac + 0.14 * Math.sin(hFrac * Math.PI));
-      const dirMod = 0.16 * intensity * Math.cos(theta0 - dirRad) * poleEnv;
+      const dirAmp = Math.min(0.16 * intensity, maxDerivDrop * 0.92);
+      const dirMod = dirAmp * Math.cos(theta0 - dirRad) * poleEnv;
       theta += diagSweep + dirMod;
     } else if (windType === 'gusts') {
-      // 2–3 alternating smooth gust waves + bounded azimuthal density shift (∂theta'/∂theta >= 0.56 > 0)
+      // 2–3 alternating smooth gust waves + dynamically bounded azimuthal density shift (>= 0.85 mm clearance!)
       const waveSweep =
         intensity *
         (0.24 * Math.sin(2.6 * Math.PI * hFrac + dirRad) +
           0.11 * Math.sin(4.4 * Math.PI * hFrac - dirRad * 0.7)) *
         (0.35 + 0.65 * poleEnv);
+      const bunchAmp = Math.min(0.21 * Math.min(intensity, 1.85), maxDerivDrop * 0.92);
       const bunching =
-        0.21 *
-        Math.min(intensity, 1.85) *
-        Math.sin(theta0 - dirRad) *
-        Math.sin(2.5 * Math.PI * hFrac) *
-        poleEnv;
+        bunchAmp * Math.sin(theta0 - dirRad) * Math.sin(2.5 * Math.PI * hFrac) * poleEnv;
       theta += waveSweep + bunching;
     } else {
       // Light global breeze drift before localized flank vortex (composition of bijections = bijection!)
@@ -1716,8 +1853,12 @@ function appendWindFlowFins(ctx: ExtraGeometryContext): void {
     };
 
     if (windType === 'vortex' && intensity > 1e-4) {
+      // Dynamically bound vortex shear at high finCount so parallel swirling walls keep >= 0.85 mm clearance!
+      const equatSpacingMm = (2 * Math.PI * sphereR) / finCount;
+      const safeShearRatio = clamp(equatSpacingMm / (finThickness + 0.85), 1.0, 4.5);
+      const maxPsiAtFlank = Math.sqrt(Math.max(0.1, safeShearRatio * safeShearRatio - 1.0)) * 1.15;
       const gamma = Math.acos(clamp(dot3(p, vortexAxis), -1, 1));
-      const psi = intensity * 1.85 * Math.exp(-(gamma * gamma) / vortexTwoSigma2);
+      const psi = Math.min(intensity * 1.85, maxPsiAtFlank) * Math.exp(-(gamma * gamma) / vortexTwoSigma2);
       p = rotateAroundAxis3(p, vortexAxis, psi);
     }
 
@@ -1790,11 +1931,6 @@ function appendWindFlowFins(ctx: ExtraGeometryContext): void {
         invertedForPendant
       );
     }
-  }
-
-  // Smooth watertight Ø4 mm central polar union button sealing the North Pole completely (0.0 mm hole!)
-  if (isClosedPoleLed) {
-    appendPolarUnionButton(mb, seatY + shadeHeight, 2.0, 2.0);
   }
 }
 

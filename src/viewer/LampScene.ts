@@ -336,9 +336,11 @@ export class LampScene {
       if (mount.type === 'led_kit_001') {
         // LED Kit 001 puck sits in the open-top upper cup flush with the top of the base collar!
         const ledCupTopY =
-          base.style === 'conkel'
-            ? Math.max(seatY, 14.5) + couplingH
-            : seatY + couplingH;
+          base.style === 'compact_flush'
+            ? couplingH
+            : base.style === 'conkel'
+              ? Math.max(seatY, 14.5) + couplingH
+              : seatY + couplingH;
         bulbY = ledCupTopY - 3.0;
         // Point light radiates upward from just above the LED puck into the shade cavity
         lightY = ledCupTopY + Math.min(silhouette.height * 0.34, 34);

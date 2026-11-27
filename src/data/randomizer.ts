@@ -42,7 +42,14 @@ const BASE_MATERIALS: MaterialPresetId[] = [
   'pla_white',
 ];
 
-const BASE_STYLES: BaseStyleId[] = ['dome', 'pedestal', 'cylinder', 'conkel', 'tripod'];
+const BASE_STYLES: BaseStyleId[] = [
+  'dome',
+  'pedestal',
+  'cylinder',
+  'conkel',
+  'tripod',
+  'compact_flush',
+];
 const COUPLINGS: CouplingType[] = ['gravity_seat', 'spider', 'thread', 'bayonet', 'friction'];
 const SPLINE_KEYS = ['mushroom', 'amphora', 'conical', 'hourglass', 'cylinder', 'sphere'] as const;
 
@@ -97,9 +104,17 @@ export function shuffleLampConfig(current: LampConfig): LampConfig {
   if (next.silhouette.buildMode === 'two_part' && next.mount.position === 'bottom') {
     const style = pick(BASE_STYLES);
     next.base.style = style;
-    next.base.finish = style !== 'tripod' && Math.random() < 0.45 ? 'ribbed' : 'smooth';
+    next.base.finish =
+      style !== 'tripod' && style !== 'compact_flush' && Math.random() < 0.45
+        ? 'ribbed'
+        : 'smooth';
     next.base.ribCount = randInt(48, 88);
-    next.base.coupling = next.silhouette.skirtWaveAmp > 0 ? 'spider' : pick(COUPLINGS);
+    next.base.coupling =
+      style === 'compact_flush'
+        ? 'bayonet'
+        : next.silhouette.skirtWaveAmp > 0
+          ? 'spider'
+          : pick(COUPLINGS);
     next.base.spiderBayonet = Math.random() < 0.6;
     next.base.spiderStyle =
       next.silhouette.crossSectionType === 'concave_square'
@@ -111,7 +126,13 @@ export function shuffleLampConfig(current: LampConfig): LampConfig {
         : next.base.spiderStyle === 'radial'
           ? pick([3, 4, 6])
           : pick([4, 5, 6]);
-    if (style === 'dome') {
+    if (style === 'compact_flush') {
+      next.base.height = 15;
+      next.base.footRadius = 37.5;
+      next.base.bayonetLugs = 3;
+      next.base.couplingClearance = 0.35;
+      next.base.collarRevealMm = 0;
+    } else if (style === 'dome') {
       next.base.height = roundStep(randRange(48, 80), 2);
       next.base.footRadius = roundStep(randRange(52, 72), 2);
       next.base.collarRevealMm = 0;
@@ -184,8 +205,8 @@ export function shuffleLampConfig(current: LampConfig): LampConfig {
     next.organic.mode = mode;
     next.organic.finCount = roundStep(randRange(18, 30), 2);
     next.organic.flameWaves = randInt(2, 5);
-    next.organic.voronoiCells = randInt(3, 6);
-    next.organic.voronoiSoftness = roundStep(randRange(0.6, 0.95), 0.05);
+    next.organic.voronoiCells = randInt(12, 20);
+    next.organic.voronoiSoftness = roundStep(randRange(0.55, 0.92), 0.05);
     next.organic.voronoiDispersion = roundStep(randRange(0.25, 0.85), 0.05);
     next.organic.gravityAccel = roundStep(randRange(-9.8, 3.0), 0.4);
     next.organic.growthAmp = roundStep(randRange(0.55, 0.95), 0.05);
@@ -199,8 +220,8 @@ export function shuffleLampConfig(current: LampConfig): LampConfig {
       next.organic.finDepth = roundStep(randRange(7, 11), 1);
       next.organic.finThickness = roundStep(randRange(1.0, 1.4), 0.1);
     } else if (mode === 'gravity') {
-      next.organic.finDepth = roundStep(randRange(18, 24), 1);
-      next.organic.finThickness = roundStep(randRange(1.3, 1.6), 0.1);
+      next.organic.finDepth = roundStep(randRange(16, 24), 1);
+      next.organic.finThickness = roundStep(randRange(1.2, 1.6), 0.1);
     } else if (mode === 'growth') {
       next.organic.finDepth = roundStep(randRange(18, 26), 1);
       next.organic.finThickness = roundStep(randRange(1.2, 1.7), 0.1);
