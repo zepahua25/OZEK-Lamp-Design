@@ -10,10 +10,12 @@ import {
   BAYONET_DEPTH_MM,
   COMPACT_FLUSH_LUG_DEPTH_MM,
   SLENDER_E26_SHADE_HUB_OUTER_RADIUS_MM,
+  THREE_PART_SHADE_HUB_OUTER_RADIUS_MM,
   THREAD_DEPTH_MM,
   couplingUsesBayonet,
   getEffectiveNeckRadius,
   isSlenderE26Mode,
+  isThreePartCupMode,
 } from './coupling';
 import { getLedKit001Dimensions } from './mounts/ledKit001';
 import { getSocketE26Dimensions } from './mounts/socketE26';
@@ -52,6 +54,9 @@ export function getMinSafeShadeBaseRadius(config: LampConfig): number {
     mount.position === 'bottom';
 
   if (isTwoPart) {
+    if (isThreePartCupMode(config)) {
+      return THREE_PART_SHADE_HUB_OUTER_RADIUS_MM + wallT + 2.0;
+    }
     if (isSlenderE26Mode(config)) {
       return SLENDER_E26_SHADE_HUB_OUTER_RADIUS_MM + wallT + 2.0;
     }

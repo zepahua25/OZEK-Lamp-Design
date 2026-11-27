@@ -12,6 +12,8 @@ import {
   SLENDER_E26_RING_HEIGHT_MM,
   SLENDER_E26_SHADE_BORE_RADIUS_MM,
   SLENDER_E26_SHADE_HUB_OUTER_RADIUS_MM,
+  THREE_PART_SHADE_BORE_RADIUS_MM,
+  THREE_PART_SHADE_HUB_OUTER_RADIUS_MM,
   THREAD_DEPTH_MM,
   couplingUsesBayonet,
   evaluateFemaleCouplingRadius,
@@ -533,6 +535,7 @@ function buildRealOrigamiShade(
   const evalWall = createWallEvaluator(config, false);
 
   const isCompactFlush = base.style === 'compact_flush';
+  const isThreePart = isThreePartCupMode(config);
   const isSlenderE26 = isSlenderE26Mode(config);
   const rMaleBase = getEffectiveNeckRadius(config);
   const extraCouplingDepth = isCompactFlush
@@ -546,9 +549,11 @@ function buildRealOrigamiShade(
     !isCompactFlush && base.coupling === 'gravity_seat'
       ? Math.max(0.4, base.couplingClearance)
       : clamp(base.couplingClearance, 0.2, 0.65);
-  const rHubOut = isSlenderE26
-    ? SLENDER_E26_SHADE_HUB_OUTER_RADIUS_MM
-    : rMaleBase + effectiveClr + extraCouplingDepth + Math.max(2.6, wallT + 0.6);
+  const rHubOut = isThreePart
+    ? THREE_PART_SHADE_HUB_OUTER_RADIUS_MM
+    : isSlenderE26
+      ? SLENDER_E26_SHADE_HUB_OUTER_RADIUS_MM
+      : rMaleBase + effectiveClr + extraCouplingDepth + Math.max(2.6, wallT + 0.6);
 
   const deckH = isCompactFlush
     ? COMPACT_FLUSH_RIM_HEIGHT_MM
@@ -560,7 +565,7 @@ function buildRealOrigamiShade(
 
   // --- COMPONENT A: Exact Low-Poly Yoshimura Origami Shell (N = 2*horizFacets, M = 2*vertTiers) ---
   const hf = Math.max(6, Math.min(24, Math.round(origami.horizFacets)));
-  const vt = Math.max(3, Math.min(12, Math.round(origami.vertTiers)));
+  const vt = Math.max(2, Math.min(12, Math.round(origami.vertTiers)));
   const N = hf * 2;
   const M = vt * 2;
   const cosHalfStep = Math.cos(Math.PI / N);
@@ -672,9 +677,11 @@ function buildRealOrigamiShade(
     for (let u = 0; u < Nhub; u++) {
       const theta = (u / Nhub) * Math.PI * 2;
       const yVert = row === 0 ? yWorld + flushCordArchAtTheta(theta) : yWorld;
-      const rInCollar = isSlenderE26
-        ? SLENDER_E26_SHADE_BORE_RADIUS_MM
-        : evaluateFemaleCouplingRadius(rMaleBase, theta, yVert - seatY, base);
+      const rInCollar = isThreePart
+        ? THREE_PART_SHADE_BORE_RADIUS_MM
+        : isSlenderE26
+          ? SLENDER_E26_SHADE_BORE_RADIUS_MM
+          : evaluateFemaleCouplingRadius(rMaleBase, theta, yVert - seatY, base);
       const safeRIn = Math.min(rInCollar, rHubOut - 1.4);
       hiArr[u] = mb.addCyl(safeRIn, theta, yVert, rOutHere - safeRIn);
       hoArr[u] = mb.addCyl(rOutHere, theta, yVert, rOutHere - safeRIn);
@@ -753,6 +760,7 @@ function buildCoupledShade(
   const evalWall = createWallEvaluator(config, false);
 
   const isCompactFlush = base.style === 'compact_flush';
+  const isThreePart = isThreePartCupMode(config);
   const isSlenderE26 = isSlenderE26Mode(config);
   const isSpider = !isCompactFlush && (base.coupling === 'spider' || isSlenderE26);
   const rMaleBase = getEffectiveNeckRadius(config);
@@ -767,9 +775,11 @@ function buildCoupledShade(
     !isCompactFlush && base.coupling === 'gravity_seat'
       ? Math.max(0.4, base.couplingClearance)
       : clamp(base.couplingClearance, 0.2, 0.65);
-  const rHubOut = isSlenderE26
-    ? SLENDER_E26_SHADE_HUB_OUTER_RADIUS_MM
-    : rMaleBase + effectiveClr + extraCouplingDepth + Math.max(2.6, wallT + 0.6);
+  const rHubOut = isThreePart
+    ? THREE_PART_SHADE_HUB_OUTER_RADIUS_MM
+    : isSlenderE26
+      ? SLENDER_E26_SHADE_HUB_OUTER_RADIUS_MM
+      : rMaleBase + effectiveClr + extraCouplingDepth + Math.max(2.6, wallT + 0.6);
 
   // Optional Organic Wavy Bottom Skirt (0 - 15 mm, 3 - 8 waves; disabled when flush-embedded)
   const waveAmp = isCompactFlush ? 0 : clamp(silhouette.skirtWaveAmp || 0, 0, 15);
@@ -964,9 +974,11 @@ function buildCoupledShade(
     for (let u = 0; u < N; u++) {
       const theta = thetas[u];
       const yVert = row === 0 ? yWorld + flushCordArchAtTheta(theta) : yWorld;
-      const rInCollar = isSlenderE26
-        ? SLENDER_E26_SHADE_BORE_RADIUS_MM
-        : evaluateFemaleCouplingRadius(rMaleBase, theta, yVert - seatY, base);
+      const rInCollar = isThreePart
+        ? THREE_PART_SHADE_BORE_RADIUS_MM
+        : isSlenderE26
+          ? SLENDER_E26_SHADE_BORE_RADIUS_MM
+          : evaluateFemaleCouplingRadius(rMaleBase, theta, yVert - seatY, base);
       const safeRIn = Math.min(rInCollar, rHubOut - 1.4);
       hInArr[u] = mb.addCyl(safeRIn, theta, yVert, rHubOut - safeRIn);
       hOutArr[u] = mb.addCyl(rHubOut, theta, yVert, rHubOut - safeRIn);

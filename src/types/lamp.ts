@@ -200,9 +200,9 @@ export interface LouversParams {
 export interface OrigamiParams {
   /** Number of geometric diamond pleats around circumference (6 - 24) */
   horizFacets: number;
-  /** Number of stacked origami diamond tiers vertically (3 - 12) */
+  /** Number of stacked origami diamond tiers vertically (2 - 12) */
   vertTiers: number;
-  /** Diamond fold protrusion depth (3 - 16 mm) */
+  /** Diamond fold protrusion depth (2 - 16 mm) */
   depth: number;
   /** Subtle progressive helical twist (0 - 180 deg) */
   twistDeg: number;
@@ -212,6 +212,8 @@ export interface OrigamiParams {
   wallThickness?: number;
   /** True low-poly flat triangular Yoshimura origami facets (radialSegs = 2*horizFacets, heightSegs = 2*vertTiers) */
   realFaceted?: boolean;
+  /** Fold direction: false = outward (Erizo / Cristal), true = inward (Origami) */
+  invertFolds?: boolean;
 }
 
 export type WovenPattern = 'basket_1x1' | 'knitted' | 'ripple_mesh' | 'grid_mesh';

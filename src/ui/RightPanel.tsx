@@ -1064,6 +1064,16 @@ export const RightPanel: React.FC<RightPanelProps> = ({
 
         {tab === 'pattern' && config.family === 'origami' && (
           <>
+            <SegmentedControl
+              label="Dirección de pliegues"
+              value={config.origami.invertFolds ? 'inward' : 'outward'}
+              dark={isNight}
+              options={[
+                { value: 'outward', label: 'Hacia afuera (Erizo / Cristal)' },
+                { value: 'inward', label: 'Hacia adentro (Origami)' },
+              ]}
+              onChange={(dir) => updateOrigami({ invertFolds: dir === 'inward' }, false)}
+            />
             <StudioSlider
               label="Facetas diamante por vuelta"
               value={config.origami.horizFacets}
@@ -1081,9 +1091,11 @@ export const RightPanel: React.FC<RightPanelProps> = ({
               label="Niveles verticales de pliegue"
               value={config.origami.vertTiers}
               defaultValue={defaultForFamily.origami.vertTiers}
-              min={3}
+              min={2}
               max={12}
               step={1}
+              minLabel="2 (amplios)"
+              maxLabel="12 (piquitos)"
               dark={isNight}
               onChange={(vertTiers) => updateOrigami({ vertTiers }, true)}
               onCommit={onCommitGeometry}
@@ -1092,7 +1104,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
               label="Profundidad geométrica"
               value={config.origami.depth}
               defaultValue={defaultForFamily.origami.depth}
-              min={3.0}
+              min={2.0}
               max={16.0}
               step={0.5}
               unit="mm"
@@ -1906,33 +1918,88 @@ export const RightPanel: React.FC<RightPanelProps> = ({
 
                 {config.base.style === 'dome' && (
                   config.mount.type === 'e26_e27' ? (
-                    <StudioSlider
-                      label="Cuello esbelto Ø17 mm (E26/E27)"
-                      value={config.base.domeStemHeightMm ?? 0}
-                      defaultValue={16}
-                      min={0}
-                      max={22}
-                      step={1}
-                      unit="mm"
-                      minLabel="Sin cuello"
-                      maxLabel="22 mm"
-                      dark={isNight}
-                      onChange={(domeStemHeightMm) =>
-                        updateBase(
-                          {
-                            domeStemHeightMm,
-                            ...(domeStemHeightMm > 0
-                              ? { coupling: 'slender_e26', spiderBayonet: false }
-                              : {}),
-                          },
-                          true
-                        )
-                      }
-                      onCommit={onCommitGeometry}
-                    />
+                    <div className="space-y-2">
+                      <label
+                        className={`flex items-center justify-between gap-2 px-3 py-2 rounded-xl border cursor-pointer transition-colors ${
+                          isThreePart
+                            ? isNight
+                              ? 'bg-emerald-500/15 border-emerald-400/45'
+                              : 'bg-emerald-50/90 border-emerald-300/90'
+                            : isNight
+                              ? 'bg-zinc-800/40 border-zinc-700/60'
+                              : 'bg-zinc-900/[0.02] border-zinc-900/[0.08]'
+                        }`}
+                      >
+                        <div>
+                          <div className="text-[12px] font-semibold">
+                            3 Piezas (Palito fino + Copa interna)
+                          </div>
+                          <div className={`text-[10.5px] ${mutedText}`}>
+                            Palito Ø 15.5 mm · Copa E26 oculta adentro de la pantalla
+                          </div>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={isThreePart}
+                          onChange={(e) => {
+                            const enable = e.target.checked;
+                            onChangeGeometry(
+                              (prev) => ({
+                                ...prev,
+                                silhouette: {
+                                  ...prev.silhouette,
+                                  buildMode: enable ? 'three_part' : 'two_part',
+                                },
+                                mount: enable
+                                  ? { ...prev.mount, position: 'bottom', type: 'e26_e27' }
+                                  : prev.mount,
+                                base: {
+                                  ...prev.base,
+                                  coupling: enable ? 'slender_e26' : prev.base.coupling,
+                                  spiderBayonet: enable ? false : prev.base.spiderBayonet,
+                                  domeStemHeightMm: enable
+                                    ? clampNum(prev.base.domeStemHeightMm ?? 24, 12, 40)
+                                    : prev.base.domeStemHeightMm,
+                                },
+                              }),
+                              false
+                            );
+                          }}
+                          className="w-4 h-4 accent-emerald-600 rounded cursor-pointer"
+                        />
+                      </label>
+                      <StudioSlider
+                        label="Largo del palito"
+                        value={clampNum(
+                          config.base.domeStemHeightMm ?? (isThreePart ? 24 : 0),
+                          isThreePart ? 12 : 0,
+                          40
+                        )}
+                        defaultValue={24}
+                        min={isThreePart ? 12 : 0}
+                        max={40}
+                        step={1}
+                        unit="mm"
+                        minLabel={isThreePart ? '12 mm' : 'Sin cuello'}
+                        maxLabel="40 mm"
+                        dark={isNight}
+                        onChange={(domeStemHeightMm) =>
+                          updateBase(
+                            {
+                              domeStemHeightMm,
+                              ...(domeStemHeightMm > 0
+                                ? { coupling: 'slender_e26', spiderBayonet: false }
+                                : {}),
+                            },
+                            true
+                          )
+                        }
+                        onCommit={onCommitGeometry}
+                      />
+                    </div>
                   ) : (
                     <div className={`text-[10.5px] px-2.5 py-1.5 rounded-lg border ${divider} ${mutedText}`}>
-                      Cuello esbelto Ø17 mm desactivado automáticamente con Bambu LED Kit 001 (Ø 59.7 mm).
+                      Modo 3 Piezas y palito fino disponibles al seleccionar Socket E26/E27 (desactivado con LED Kit 001 Ø 59.7 mm).
                     </div>
                   )
                 )}

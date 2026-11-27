@@ -74,8 +74,8 @@ function buildOmoi01(): LampConfig {
   cfg.base.style = 'dome';
   cfg.base.finish = 'ribbed';
   cfg.base.ribCount = 68;
-  cfg.base.height = 52; // 52 dome + 14 stem (Ø15) + 17.5 Copa Arena = 83.5 seatY => 83.5 + 150 = 233.5 mm (<= 245 mm A1!)
-  cfg.base.domeStemHeightMm = 14;
+  cfg.base.height = 52; // 52 dome + 24 palito (Ø15.5) = 76 seatY (Copa Arena oculta 76..90 adentro!) => 76 + 150 = 226 mm (<= 245 mm A1!)
+  cfg.base.domeStemHeightMm = 24;
   cfg.base.footRadius = 60;
   cfg.base.neckRadius = 23.0;
   cfg.base.coupling = 'slender_e26';
@@ -129,11 +129,12 @@ function buildZoukei02(): LampConfig {
 
   cfg.origami.horizFacets = 10;
   cfg.origami.vertTiers = 4;
-  cfg.origami.depth = 14.0; // Rombos planos profundos y arquitectónicos (14 mm)
+  cfg.origami.depth = 7.5; // Rombos elegantes doblados hacia adentro (7.5 mm)
   cfg.origami.twistDeg = 0;
   cfg.origami.edgeSoftness = 0.08;
   cfg.origami.wallThickness = 1.0; // Pared translúcida 1.0 mm Modo Jarrón
   cfg.origami.realFaceted = true; // Resolución exacta 2*horizFacets × 2*vertTiers (planos triangulares reales!)
+  cfg.origami.invertFolds = true; // Pliegues hacia adentro (Origami clásico)
 
   cfg.base.style = 'cylinder';
   cfg.base.finish = 'smooth';
@@ -229,16 +230,16 @@ function buildKobo04(): LampConfig {
   const cfg = cloneConfig(DEFAULT_CONFIG);
   cfg.family = 'woven';
   cfg.silhouette.type = 'custom_spline';
-  cfg.silhouette.height = 175; // Talla M (175 mm) -> 175 + 38 + 4 = 217 mm (<= 245 mm A1!)
+  cfg.silhouette.height = 175; // Talla M (175 mm) -> 175 + 38 = 213 mm (<= 245 mm A1!)
   cfg.silhouette.shadeScale = 1.0;
   cfg.silhouette.controlPoints = [
-    { v: 0.0, r: 47 },
-    { v: 0.22, r: 80 }, // Hombro diagonal a ~41° (<= 45°, 0% soportes!)
+    { v: 0.0, r: 48 }, // Al ras exacto del tambor de la base (footRadius = 48 mm) sin ranura inferior!
+    { v: 0.22, r: 80 }, // Hombro diagonal a ~40° (<= 45°, 0% soportes!)
     { v: 0.55, r: 74 },
     { v: 0.85, r: 66 },
     { v: 1.0, r: 62 },
   ];
-  cfg.silhouette.baseRadius = 47;
+  cfg.silhouette.baseRadius = 48;
   cfg.silhouette.midRadius = 74;
   cfg.silhouette.topRadius = 62;
   cfg.silhouette.crossSectionType = 'circle';
@@ -256,14 +257,14 @@ function buildKobo04(): LampConfig {
   cfg.base.style = 'cylinder';
   cfg.base.finish = 'smooth';
   cfg.base.height = 38;
-  cfg.base.footRadius = 46;
+  cfg.base.footRadius = 48; // Al ras exacto con el radio inferior de la pantalla (48 mm)!
   cfg.base.neckRadius = 28.5;
   cfg.base.coupling = 'bayonet';
   cfg.base.bayonetLugs = 3;
   cfg.base.couplingClearance = 0.35;
   cfg.base.signatureGrooves = false;
   cfg.base.authorSeal = true;
-  cfg.base.collarRevealMm = 4;
+  cfg.base.collarRevealMm = 0; // Sin ranura inferior: pantalla asienta directo al ras sobre el tambor!
 
   cfg.mount.type = 'e26_e27';
   cfg.mount.position = 'bottom';

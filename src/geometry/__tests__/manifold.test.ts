@@ -25,9 +25,9 @@ import {
   COMPACT_FLUSH_OUTER_RADIUS_MM,
   COMPACT_FLUSH_TWIST_Y_HIGH,
   COMPACT_FLUSH_TWIST_Y_LOW,
-  SLENDER_E26_SHADE_BORE_RADIUS_MM,
   SLENDER_E26_SOCKET_OUTER_RADIUS_MM,
   THREE_PART_CUP_BORE_RADIUS_MM,
+  THREE_PART_SHADE_BORE_RADIUS_MM,
   THREE_PART_STEM_INNER_RADIUS_MM,
   THREE_PART_STEM_OUTER_RADIUS_MM,
   THREE_PART_TENON_OUTER_RADIUS_MM,
@@ -35,6 +35,7 @@ import {
   evaluateMaleCouplingOffset,
   getEffectiveDomeStemHeightMm,
   getShadeSeatY,
+  getThreePartCupSeatY,
 } from '../coupling';
 import { organicFamily } from '../families/organic';
 import { helicalFamily } from '../families/helical';
@@ -1409,14 +1410,23 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
     expect(evaluateHankoSealDepthMm(-1.33, -1.82, sealSpec), 'Z☰ diagonal passes lower-left (-u,-v)').toBeGreaterThan(0.35);
     expect(evaluateHankoSealDepthMm(1.33, -1.82, sealSpec), 'Z☰ lower-right gap (+u,-v) is raised').toBeLessThan(0.05);
 
-    // 3D base mesh check on KŌBŌ 04 (smooth cylinder r = 46 mm, drumH = 38 mm, seal lowered right above cable arch: yCenter = 16.75 mm):
+    // 3D base mesh check on KŌBŌ 04 (smooth cylinder r = 48 mm flush with shade base, collarRevealMm = 0, seal lowered at yCenter = 16.75 mm):
     const kobo04 = cloneConfig(OZEK_SIGNATURE_COLLECTION.find((p) => p.id === 'kobo-04')!.config);
     expect(kobo04.woven.horizFreq).toBe(18);
     expect(kobo04.woven.vertFreq).toBe(14);
     expect(kobo04.woven.rippleDepth).toBeCloseTo(5.5, 2);
     expect(kobo04.silhouette.includeDiffuser).toBe(true);
-    // Trapezoidal 45° shoulder silhouette check: narrow base (v=0) -> max shoulder at v=0.22 -> slight inward taper to v=1.0
-    expect(kobo04.silhouette.controlPoints[0].r).toBeLessThan(52);
+    expect(kobo04.base.footRadius).toBe(48);
+    expect(kobo04.base.collarRevealMm).toBe(0);
+    expect(kobo04.silhouette.controlPoints[0].r).toBe(48);
+    // Smooth bottom 3 mm RippleMesh fade (v = 0 => exact flush wallThickness, zero bottom notch/lip!)
+    const evalKobo = wovenFamily.createEvaluator(kobo04);
+    expect(
+      evalKobo({ u: 0.25, theta: Math.PI / 2, v: 0, y: 0, baseRadius: 48, height: 175 })
+        .explicitWallThicknessMm,
+      'KŌBŌ 04 bottom rim (v=0) flush wall thickness'
+    ).toBeCloseTo(kobo04.mount.wallThickness, 2);
+    // Trapezoidal 45° shoulder silhouette check: narrow base (v=0, r=48) -> max shoulder at v=0.22 -> slight inward taper to v=1.0
     expect(kobo04.silhouette.controlPoints[1].v).toBeCloseTo(0.22, 2);
     expect(kobo04.silhouette.controlPoints[1].r).toBeGreaterThan(kobo04.silhouette.controlPoints[0].r + 25);
     expect(kobo04.silhouette.controlPoints[4].r).toBeLessThan(kobo04.silhouette.controlPoints[1].r);
@@ -1435,7 +1445,7 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
       if (x <= 35) continue;
       const dy = y - yCenterKobo;
       const r = Math.hypot(x, z);
-      const isDebossed = r < 46 - 0.35;
+      const isDebossed = r < 48 - 0.35;
       if (y > 25 && y < 36 && Math.abs(z) < 7 && isDebossed) highWallDebossed++;
       if (dy > 1.65 && dy < 2.0) {
         if (z < -0.95 && z > -1.75 && isDebossed) upperRightDebossed++;
@@ -1446,13 +1456,14 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
     expect(upperLeftDebossed, 'KŌBŌ 04 rear Z☰ upper-left (z > 0) stays un-debossed (not mirrored!)').toBe(0);
     expect(highWallDebossed, 'KŌBŌ 04 rear Z☰ sits low just above cable arch (not at top wall)').toBe(0);
 
-    // 2. Verify ZOUKEI 02 · 造形 is real low-poly flat-triangle Origami (10×4 -> 20×8 exact, 14 mm depth, cylinder base 18 mm adjustable to 55 mm!)
+    // 2. Verify ZOUKEI 02 · 造形 modular Origami (invertFolds = true, 10×4 -> 20×8 exact, 7.5 mm depth + outward crystal toggle + 2..12 tiers!)
     const zoukeiPiece = OZEK_SIGNATURE_COLLECTION.find((p) => p.id === 'zoukei-02')!;
     expect(zoukeiPiece.config.family).toBe('origami');
     expect(zoukeiPiece.config.origami.realFaceted).toBe(true);
+    expect(zoukeiPiece.config.origami.invertFolds).toBe(true);
     expect(zoukeiPiece.config.origami.horizFacets).toBe(10);
     expect(zoukeiPiece.config.origami.vertTiers).toBe(4);
-    expect(zoukeiPiece.config.origami.depth).toBeCloseTo(14.0, 2);
+    expect(zoukeiPiece.config.origami.depth).toBeCloseTo(7.5, 2);
     expect(zoukeiPiece.config.origami.edgeSoftness).toBeCloseTo(0.08, 2);
     expect(zoukeiPiece.config.origami.wallThickness).toBeCloseTo(1.0, 2);
     expect(zoukeiPiece.config.silhouette.height).toBe(180);
@@ -1464,13 +1475,34 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
       radialSegs: 20,
       heightSegs: 8,
     });
-    // Also verify ZOUKEI 02 with tall cylinder base (55 mm) stays 100% watertight!
-    const zoukeiTall = cloneConfig(zoukeiPiece.config);
-    zoukeiTall.base.height = 55;
-    const zoukeiTallRes = generateLampGeometry(zoukeiTall, { draft: true, validateManifold: true });
-    expect(zoukeiTallRes.metrics.openEdges, 'ZOUKEI 02 tall cylinder openEdges').toBe(0);
-    expect(zoukeiTallRes.metrics.nonManifoldEdges, 'ZOUKEI 02 tall cylinder nonManifold').toBe(0);
-    expect(zoukeiTallRes.metrics.isWatertight, 'ZOUKEI 02 tall cylinder watertight').toBe(true);
+    // Confirm invertFolds cleanly flips fold sign (inward Origami vs outward Erizo/Cristal)
+    const evalInward = origamiFamily.createEvaluator(zoukeiPiece.config);
+    const zoukeiOutward = cloneConfig(zoukeiPiece.config);
+    zoukeiOutward.origami.invertFolds = false;
+    const evalOutward = origamiFamily.createEvaluator(zoukeiOutward);
+    const probeCtx = { u: 0.05, theta: 0.1 * Math.PI, v: 0.25, y: 45, baseRadius: 65, height: 180 };
+    expect(evalInward(probeCtx).outerOffset, 'invertFolds flips origami fold direction').toBeCloseTo(
+      -evalOutward(probeCtx).outerOffset,
+      4
+    );
+    // Verify extended modular Origami range (vertTiers = 2, depth = 2.0 mm AND vertTiers = 12, horizFacets = 24, depth = 16 mm, tall 55 mm base)
+    const zoukeiWide = cloneConfig(zoukeiPiece.config);
+    zoukeiWide.origami.vertTiers = 2;
+    zoukeiWide.origami.depth = 2.0;
+    zoukeiWide.base.height = 55;
+    const zoukeiWideRes = generateLampGeometry(zoukeiWide, { draft: true, validateManifold: true });
+    expect(zoukeiWideRes.metrics.openEdges, 'Origami 2 tiers / 55 mm base openEdges').toBe(0);
+    expect(zoukeiWideRes.metrics.nonManifoldEdges, 'Origami 2 tiers / 55 mm base nonManifold').toBe(0);
+    expect(zoukeiWideRes.metrics.isWatertight, 'Origami 2 tiers / 55 mm base watertight').toBe(true);
+
+    const zoukeiCrystal = cloneConfig(zoukeiOutward);
+    zoukeiCrystal.origami.horizFacets = 24;
+    zoukeiCrystal.origami.vertTiers = 12;
+    zoukeiCrystal.origami.depth = 16.0;
+    const zoukeiCrystalRes = generateLampGeometry(zoukeiCrystal, { draft: true, validateManifold: true });
+    expect(zoukeiCrystalRes.metrics.openEdges, 'Origami 24×12 outward crystal openEdges').toBe(0);
+    expect(zoukeiCrystalRes.metrics.nonManifoldEdges, 'Origami 24×12 outward crystal nonManifold').toBe(0);
+    expect(zoukeiCrystalRes.metrics.isWatertight, 'Origami 24×12 outward crystal watertight').toBe(true);
 
     // 3. Verify EN 03 · 円 / ☰ REAL axial helical twist (60°, 48 ribs, flush 56 mm base, bottom 3 mm fade = 0!)
     const en03 = cloneConfig(OZEK_SIGNATURE_COLLECTION.find((p) => p.id === 'en-03')!.config);
@@ -1532,13 +1564,16 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
     }
     expect(conkelMaxY, 'Conkel LED base respects height = 48 mm').toBeCloseTo(48, 1);
 
-    // 5. Verify OMOI 01 · 思い 3-Piece Mode (Base Ónice Ø15 mm stem + Copa Arena E26 + Pantalla Arena + ZIP Copa.stl!)
+    // 5. Verify Reusable 3-Piece Hidden Internal Copa Mode (OMOI 01 domeStemHeightMm = 24 + Pleated reuse!)
     const omoi01 = cloneConfig(OZEK_SIGNATURE_COLLECTION.find((p) => p.id === 'omoi-01')!.config);
     expect(omoi01.silhouette.buildMode).toBe('three_part');
     expect(omoi01.base.style).toBe('dome');
     expect(omoi01.base.coupling).toBe('slender_e26');
     expect(omoi01.mount.type).toBe('e26_e27');
-    expect(getShadeSeatY(omoi01)).toBeCloseTo(83.5, 2); // 52 dome + 14 stem + 17.5 Copa = 83.5 mm
+    expect(omoi01.base.domeStemHeightMm).toBe(24);
+    // Shade sits DIRECTLY at the top of the black palito (seatY === cupSeatY === 52 + 24 = 76 mm), hiding Copa INSIDE!
+    expect(getShadeSeatY(omoi01)).toBeCloseTo(76.0, 2);
+    expect(getShadeSeatY(omoi01)).toBeCloseTo(getThreePartCupSeatY(omoi01), 3);
 
     const omoiRes = generateLampGeometry(omoi01, { draft: false, validateManifold: true });
     expect(omoiRes.parts, 'OMOI 01 3-Piece outputs Base + Copa + Pantalla').toHaveLength(3);
@@ -1548,7 +1583,7 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
     const omoiShade = omoiRes.parts.find((p) => p.role === 'shade')!;
     expect(omoiCup, 'OMOI 01 has independent Copa part').toBeDefined();
 
-    // Piece 1 (Base Ónice): Ø 15 mm stem / Ø 8.5 mm bore / Ø 13 mm tenon — ZERO dark funnel above dome!
+    // Piece 1 (Base Ónice): Ø 15.5 mm stem (24 mm) / Ø 8.5 mm bore / Ø 14 × 10 mm tenon — ZERO dark funnel!
     let stemOuterVerts = 0;
     let stemInnerVerts = 0;
     let tenonVerts = 0;
@@ -1556,56 +1591,72 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
     for (let i = 0; i < omoiBase.positions.length; i += 3) {
       const y = omoiBase.positions[i + 1];
       const r = Math.hypot(omoiBase.positions[i], omoiBase.positions[i + 2]);
-      if (y >= 51.9 && y <= 74.2 && Math.abs(r - THREE_PART_STEM_INNER_RADIUS_MM) < 0.25) {
+      if (y >= 51.9 && y <= 86.2 && Math.abs(r - THREE_PART_STEM_INNER_RADIUS_MM) < 0.25) {
         stemInnerVerts++;
       }
-      if (y >= 53.0 && y <= 66.2) {
+      if (y >= 53.0 && y <= 76.2) {
         if (r > maxRInStemZone) maxRInStemZone = r;
         if (Math.abs(r - THREE_PART_STEM_OUTER_RADIUS_MM) < 0.25) stemOuterVerts++;
       }
-      if (y >= 66.3 && y <= 74.2) {
+      if (y >= 76.3 && y <= 86.2) {
         if (r > maxRInStemZone) maxRInStemZone = r;
         if (Math.abs(r - THREE_PART_TENON_OUTER_RADIUS_MM) < 0.25) tenonVerts++;
       }
     }
-    expect(stemOuterVerts, 'OMOI 01 Base Ø15 mm stem outer vertices').toBeGreaterThan(60);
+    expect(stemOuterVerts, 'OMOI 01 Base Ø15.5 mm stem outer vertices').toBeGreaterThan(60);
     expect(stemInnerVerts, 'OMOI 01 Base Ø8.5 mm cable bore vertices').toBeGreaterThan(60);
-    expect(tenonVerts, 'OMOI 01 Base Ø13 mm upper tenon vertices').toBeGreaterThan(60);
-    expect(maxRInStemZone, 'OMOI 01 Base has ZERO dark funnel above dome (max r === 7.5 mm)').toBeCloseTo(
+    expect(tenonVerts, 'OMOI 01 Base Ø14 mm × 10 mm upper tenon vertices').toBeGreaterThan(60);
+    expect(maxRInStemZone, 'OMOI 01 Base has ZERO dark funnel above dome (max r === 7.75 mm)').toBeCloseTo(
       THREE_PART_STEM_OUTER_RADIUS_MM,
       1
     );
 
-    // Piece 2 (Copa Arena): Ø 13.5 mm slip bore + Ø 46 / Ø 40.5 mm E26 ring + slicer-grade watertight STL!
+    // Piece 2 (Copa Interna, Arena): 100% FLAT bottom at seatY (76 mm), grows UPWARD inside shade (76..90 mm)!
     const cupStl = exportPartToBinarySTL(omoiCup);
     const cupStlRep = validateBinarySTLManifold(cupStl);
     expect(cupStlRep.degenerateTriangles, 'Copa STL 0 degenerate tris').toBe(0);
     expect(cupStlRep.openEdges, 'Copa STL 0 welded open edges').toBe(0);
     expect(cupStlRep.nonManifoldEdges, 'Copa STL 0 welded non-manifold edges').toBe(0);
     expect(cupStlRep.isWatertight, 'Copa STL watertight').toBe(true);
-    expect(cupStlRep.minZ, 'Copa STL sits flat on Z = 0').toBeCloseTo(0, 3);
+    expect(cupStlRep.minZ, 'Copa STL sits 100% flat on Z = 0').toBeCloseTo(0, 3);
 
+    let cupMinY = Infinity;
+    let cupMaxY = -Infinity;
     let cupSlipBoreVerts = 0;
     let cupE26OuterVerts = 0;
     for (let i = 0; i < omoiCup.positions.length; i += 3) {
       const y = omoiCup.positions[i + 1];
       const r = Math.hypot(omoiCup.positions[i], omoiCup.positions[i + 2]);
-      if (y <= 74.5 && Math.abs(r - THREE_PART_CUP_BORE_RADIUS_MM) < 0.2) cupSlipBoreVerts++;
-      if (y >= 79.8 && Math.abs(r - SLENDER_E26_SOCKET_OUTER_RADIUS_MM) < 0.25) cupE26OuterVerts++;
+      if (y < cupMinY) cupMinY = y;
+      if (y > cupMaxY) cupMaxY = y;
+      if (y <= 86.2 && Math.abs(r - THREE_PART_CUP_BORE_RADIUS_MM) < 0.2) cupSlipBoreVerts++;
+      if (y >= 76.4 && Math.abs(r - SLENDER_E26_SOCKET_OUTER_RADIUS_MM) < 0.25) cupE26OuterVerts++;
     }
-    expect(cupSlipBoreVerts, 'Copa Ø13.5 mm slip bore vertices').toBeGreaterThan(60);
-    expect(cupE26OuterVerts, 'Copa Ø46 mm E26 socket ring vertices').toBeGreaterThan(60);
+    expect(cupMinY, 'Copa does NOT hang below shade (minY === seatY === 76 mm)').toBeCloseTo(76.0, 2);
+    expect(cupMaxY, 'Copa grows UPWARD inside shade (maxY === seatY + 14 === 90 mm)').toBeCloseTo(90.0, 2);
+    expect(cupSlipBoreVerts, 'Copa Ø14.5 mm (10 mm deep) tenon bore vertices').toBeGreaterThan(60);
+    expect(cupE26OuterVerts, 'Copa Ø46 mm compact hidden cylinder vertices').toBeGreaterThan(60);
 
-    // Piece 3 (Pantalla Arena): flat Z=0 spider closes to exact Ø 40.8 mm (r = 20.4 mm) central ring!
+    // Piece 3 (Pantalla Arena): starts directly at seatY = 76 mm with flat Z=0 spider encircling Copa cleanly!
     let shadeE26BoreVerts = 0;
     for (let i = 0; i < omoiShade.positions.length; i += 3) {
       const y = omoiShade.positions[i + 1];
       const r = Math.hypot(omoiShade.positions[i], omoiShade.positions[i + 2]);
-      if (y >= 83.4 && y <= 87.1 && Math.abs(r - SLENDER_E26_SHADE_BORE_RADIUS_MM) < 0.15) {
+      if (y >= 75.9 && y <= 79.6 && Math.abs(r - THREE_PART_SHADE_BORE_RADIUS_MM) < 0.15) {
         shadeE26BoreVerts++;
       }
     }
-    expect(shadeE26BoreVerts, 'OMOI 01 shade spider Ø40.8 mm central ring bore').toBeGreaterThan(60);
+    expect(shadeE26BoreVerts, 'OMOI 01 shade spider Ø46.5 mm ring encircling hidden Copa').toBeGreaterThan(60);
+
+    // Verify 3-Piece mode is reusable on ANY dome + E26/E27 lamp (e.g. Pleated with 36 mm palito!)
+    const pleated3p = cloneConfig(omoi01);
+    pleated3p.family = 'pleated';
+    pleated3p.base.domeStemHeightMm = 36;
+    const pleated3pRes = generateLampGeometry(pleated3p, { draft: true, validateManifold: true });
+    expect(pleated3pRes.parts, 'Pleated 3-Piece outputs Base + Copa + Pantalla').toHaveLength(3);
+    expect(pleated3pRes.metrics.openEdges, 'Pleated 3-Piece openEdges').toBe(0);
+    expect(pleated3pRes.metrics.nonManifoldEdges, 'Pleated 3-Piece nonManifold').toBe(0);
+    expect(pleated3pRes.metrics.isWatertight, 'Pleated 3-Piece watertight').toBe(true);
 
     // ZIP package in 3-Piece mode MUST include Copa.stl automatically!
     const omoiZip = buildLampZipPackage(omoi01, omoiRes.parts, omoiRes.metrics, 'OZEK_OMOI');

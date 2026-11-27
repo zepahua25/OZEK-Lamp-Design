@@ -38,20 +38,24 @@ export const SLENDER_E26_SHADE_BORE_RADIUS_MM = 20.4; // Ø 40.8 mm spider inner
 export const SLENDER_E26_SHADE_HUB_OUTER_RADIUS_MM = 24.4; // Ø 48.8 mm spider hub outer (4.0 mm solid clamping flange)
 
 /**
- * 3-Piece OMOI 01 Architecture ("3 Piezas: Base + Copa + Pantalla"):
- *  - Piece 1 (Base Ónice): Ribbed dome + ultra-slender Ø 15.0 mm outer / Ø 8.5 mm inner stem + Ø 13.0 × 8.0 mm upper spigot (NO dark funnel!)
- *  - Piece 2 (Copa Arena): Slip-fits onto the spigot (Ø 13.5 mm bore), flares at 45° (14 mm) to compact E26/E27 Ø 46.0 / Ø 40.5 mm ring (total 17.5 mm)
- *  - Piece 3 (Pantalla Arena): Flat Z=0 spider with Ø 40.8 mm central bore clamped directly onto Piece 2 by the E26/E27 nut!
+ * Reusable 3-Piece Architecture ("3 Piezas: Palito Fino + Copa Interna + Pantalla"):
+ *  - Piece 1 (Base Ónice): Ribbed dome + ultra-slender Ø 15.5 mm outer / Ø 8.5 mm inner stem (12–40 mm tall)
+ *    + robust Ø 14.0 × 10.0 mm upper spigot rising into the hidden internal Cup (ZERO funnel below the shade!).
+ *  - Piece 2 (Copa Interna, color Pantalla): 100% FLAT bottom flush at seatY (Z=0, 0% supports), grows UPWARD
+ *    INSIDE the shade (seatY .. seatY + 14.0 mm) with a 10 mm deep Ø 14.5 mm tenon bore & Ø 40.5 mm E26 socket cup!
+ *  - Piece 3 (Pantalla): Rests directly at seatY = top of black palito, with flat Z=0 spider (Ø 46.5 mm bore)
+ *    encircling the hidden Copa cleanly (zero collision, zero exposed funnel!).
  */
-export const THREE_PART_STEM_OUTER_RADIUS_MM = 7.5; // Ø 15.0 mm exterior
+export const THREE_PART_STEM_OUTER_RADIUS_MM = 7.75; // Ø 15.5 mm exterior (Ø 15–16 mm)
 export const THREE_PART_STEM_INNER_RADIUS_MM = 4.25; // Ø 8.5 mm cable bore
-export const THREE_PART_TENON_OUTER_RADIUS_MM = 6.5; // Ø 13.0 mm upper cylindrical coupling spigot
-export const THREE_PART_TENON_HEIGHT_MM = 8.0; // 8.0 mm press/slip engagement depth into Copa
-export const THREE_PART_CUP_BASE_OUTER_RADIUS_MM = 9.25; // Ø 18.5 mm sleeve foot (2.5 mm solid wall around Ø13.5 mm bore)
-export const THREE_PART_CUP_BORE_RADIUS_MM = 6.75; // Ø 13.5 mm slip-fit bore (+0.25 mm radial clearance for PLA)
-export const THREE_PART_CUP_FLARE_HEIGHT_MM = 14.0; // 45° self-supporting flare from r=9.25 to r=23.0 mm (0% supports!)
-export const THREE_PART_CUP_TOTAL_HEIGHT_MM =
-  THREE_PART_CUP_FLARE_HEIGHT_MM + SLENDER_E26_RING_HEIGHT_MM; // 17.5 mm total Copa height
+export const THREE_PART_TENON_OUTER_RADIUS_MM = 7.0; // Ø 14.0 mm robust upper spigot (2.75 mm solid wall!)
+export const THREE_PART_TENON_HEIGHT_MM = 10.0; // 10.0 mm sturdy engagement inside Copa (won't snap!)
+export const THREE_PART_CUP_BASE_OUTER_RADIUS_MM = 23.0; // Ø 46.0 mm flat-bottom compact internal cup
+export const THREE_PART_CUP_BORE_RADIUS_MM = 7.25; // Ø 14.5 mm slip-fit bore (+0.25 mm radial PLA clearance)
+export const THREE_PART_CUP_FLARE_HEIGHT_MM = 10.2; // Internal tenon socket depth inside hidden Copa
+export const THREE_PART_CUP_TOTAL_HEIGHT_MM = 14.0; // Grows UPWARD inside shade (seatY .. seatY + 14.0 mm)!
+export const THREE_PART_SHADE_BORE_RADIUS_MM = 23.25; // Ø 46.5 mm spider ring (+0.25 mm clearance around Ø 46 mm Copa)
+export const THREE_PART_SHADE_HUB_OUTER_RADIUS_MM = 27.0; // Ø 54.0 mm solid spider clamping hub
 
 /**
  * Bayonet vertical geometry constants (mm, localY from collar bottom = 0):
@@ -145,10 +149,10 @@ export function getEffectiveDomeStemHeightMm(config: LampConfig): number {
     return 0;
   }
   if (isThreePartCupMode(config)) {
-    return clamp(config.base.domeStemHeightMm ?? 14, 6, 22);
+    return clamp(config.base.domeStemHeightMm ?? 24, 12, 40);
   }
   const fallback = config.base.coupling === 'slender_e26' ? 16 : 0;
-  return clamp(config.base.domeStemHeightMm ?? fallback, 0, 22);
+  return clamp(config.base.domeStemHeightMm ?? fallback, 0, 40);
 }
 
 /**
@@ -188,7 +192,8 @@ export function getShadeSeatY(config: LampConfig): number {
     return 0;
   }
   if (isThreePartCupMode(config)) {
-    return getThreePartCupSeatY(config) + THREE_PART_CUP_TOTAL_HEIGHT_MM;
+    // Shade sits DIRECTLY at the top of the black palito so Piece 2 (Copa) grows UPWARD hidden inside the shade!
+    return getThreePartCupSeatY(config);
   }
   if (base.style === 'conkel') {
     if (mount.type === 'led_kit_001') {

@@ -177,11 +177,16 @@ export const wovenFamily: LampFamilyDefinition = {
         weave01 = clamp(stripArch * reedSection + underWarp, 0, 1);
       }
 
-      // Gently solidify the top 3 mm rim into a neat rounded binding collar so top edge prints strong
+      // Gently solidify the top 3 mm rim into a neat rounded binding collar so top edge prints strong,
+      // and smoothly attenuate relief across the bottom 3 mm (v = 0..0.02) so shade seats 100% flush on the base drum!
       const topRimBlend = smoothstep(0.96, 1.0, ctx.v);
+      const bottomFlushBlend = smoothstep(0.0, 0.02, ctx.v);
       const finalWeave01 = weave01 * (1 - topRimBlend) + 0.72 * topRimBlend;
 
-      const wallThicknessMm = minValleyWallMm + finalWeave01 * effectiveDepthMm;
+      const rawWallMm = minValleyWallMm + finalWeave01 * effectiveDepthMm;
+      const baseFlushWallMm = clamp(config.mount.wallThickness, 1.6, 3.2);
+      const wallThicknessMm =
+        baseFlushWallMm * (1 - bottomFlushBlend) + rawWallMm * bottomFlushBlend;
 
       return {
         outerOffset: 0,

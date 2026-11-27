@@ -630,7 +630,7 @@ export const App: React.FC = () => {
                     style: prev.base.style === 'compact_flush' ? 'dome' : prev.base.style,
                     coupling: 'slender_e26',
                     spiderBayonet: false,
-                    domeStemHeightMm: Math.max(10, prev.base.domeStemHeightMm ?? 14),
+                    domeStemHeightMm: Math.max(12, Math.min(40, prev.base.domeStemHeightMm ?? 24)),
                   },
                 };
               }

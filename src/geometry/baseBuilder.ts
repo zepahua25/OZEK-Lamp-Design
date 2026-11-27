@@ -13,6 +13,7 @@ import {
   THREE_PART_CUP_BASE_OUTER_RADIUS_MM,
   THREE_PART_CUP_BORE_RADIUS_MM,
   THREE_PART_CUP_FLARE_HEIGHT_MM,
+  THREE_PART_CUP_TOTAL_HEIGHT_MM,
   THREE_PART_STEM_INNER_RADIUS_MM,
   THREE_PART_STEM_OUTER_RADIUS_MM,
   THREE_PART_TENON_HEIGHT_MM,
@@ -1654,10 +1655,11 @@ export function buildIndependentBase(
 }
 
 /**
- * Builds Piece 2 ("Copa porta-socket E26/E27", Arena / Shade color) for 3-Piece OMOI 01 mode!
- *  - Slip-fits cleanly onto Piece 1's Ø 13.0 × 8.0 mm top spigot (Ø 13.5 mm inner bore, +0.25 mm radial PLA clearance)
- *  - Flares outward at 45° (14.0 mm) strictly to the compact E26/E27 socket ring (Ø 46.0 mm outer / Ø 40.5 mm inner)
- *  - Prints upright on Z = 0 with 0% supports, 0 open edges, 0 non-manifold edges!
+ * Builds Piece 2 ("Copa Interna porta-socket E26/E27", Shade color) for reusable 3-Piece mode!
+ *  - 100% FLAT bottom flush at seatY (Z = 0 on print bed, 0% supports!) — NEVER hangs below the shade!
+ *  - Grows UPWARD INSIDE the shade (seatY .. seatY + 14.0 mm, Ø 46.0 mm outer cylinder) so it stays completely hidden.
+ *  - Lower 10.0 mm houses a sturdy Ø 14.5 mm slip-fit sleeve gripping Piece 1's Ø 14.0 × 10.0 mm palito tenon;
+ *    upper 3.8 mm houses the Ø 40.5 mm E26/E27 socket ring with a flat upward-facing internal seat (0° overhang!).
  */
 export function buildThreePartSocketCup(
   config: LampConfig,
@@ -1667,32 +1669,25 @@ export function buildThreePartSocketCup(
   const N = draft ? 64 : 112;
   const e26 = getSocketE26Dimensions(config.mount);
   const cupBaseY = getThreePartCupSeatY(config);
-  const ringBotY = cupBaseY + THREE_PART_CUP_FLARE_HEIGHT_MM;
-  const cupTopY = ringBotY + SLENDER_E26_RING_HEIGHT_MM;
+  const cupTopY = cupBaseY + THREE_PART_CUP_TOTAL_HEIGHT_MM; // seatY + 14.0 mm
+  const socketFloorY = cupBaseY + THREE_PART_CUP_FLARE_HEIGHT_MM; // seatY + 10.2 mm (10 mm tenon grip!)
 
-  const rBotOut = THREE_PART_CUP_BASE_OUTER_RADIUS_MM; // 9.25 mm (Ø 18.5 mm)
-  const rTopOut = SLENDER_E26_SOCKET_OUTER_RADIUS_MM; // 23.0 mm (Ø 46.0 mm)
-  const rBore = THREE_PART_CUP_BORE_RADIUS_MM; // 6.75 mm (Ø 13.5 mm slip-fit bore on Ø 13.0 mm tenon)
+  const rOut = THREE_PART_CUP_BASE_OUTER_RADIUS_MM; // 23.0 mm (Ø 46.0 mm compact E26 housing)
+  const rBore = THREE_PART_CUP_BORE_RADIUS_MM; // 7.25 mm (Ø 14.5 mm slip-fit bore on Ø 14.0 mm tenon)
   const rSocketHole = e26.holeRadiusMm; // 20.25 mm (Ø 40.5 mm E26/E27 socket bore)
 
-  const outer: ProfileNode[] = [{ y: cupBaseY, r: rBotOut }];
-  const flareSegs = draft ? 5 : 8;
-  for (let i = 1; i <= flareSegs; i++) {
-    const frac = i / flareSegs;
-    outer.push({
-      y: cupBaseY + THREE_PART_CUP_FLARE_HEIGHT_MM * frac,
-      r: rBotOut + (rTopOut - rBotOut) * frac,
-    });
-  }
-  outer.push({ y: cupTopY, r: rTopOut });
+  const outer: ProfileNode[] = [
+    { y: cupBaseY, r: rOut - 0.5 }, // crisp 0.5 mm bottom lead-in bevel at Z = 0
+    { y: cupBaseY + 0.5, r: rOut },
+    { y: cupTopY - 0.4, r: rOut },
+    { y: cupTopY, r: rOut - 0.4 },
+  ];
 
-  const tenonStopY = Math.min(ringBotY - 2.4, cupBaseY + THREE_PART_TENON_HEIGHT_MM + 0.4);
-  const rShelfInner = Math.min(rSocketHole - 2.0, rBore + (ringBotY - 1.6 - tenonStopY));
+  // Upward-facing step at socketFloorY (0° overhang! solid plastic directly underneath r ∈ [7.25, 23.0])
   const inner: ProfileNode[] = [
     { y: cupTopY, r: rSocketHole },
-    { y: ringBotY, r: rSocketHole },
-    { y: ringBotY - 1.6, r: Math.max(rBore + 1.5, rShelfInner) },
-    { y: tenonStopY, r: rBore },
+    { y: socketFloorY, r: rSocketHole },
+    { y: socketFloorY - 0.2, r: rBore },
     { y: cupBaseY, r: rBore },
   ];
 

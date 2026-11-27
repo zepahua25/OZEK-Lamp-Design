@@ -34,7 +34,7 @@ export const origamiFamily: LampFamilyDefinition = {
 
   getResolution(config: LampConfig, draft: boolean) {
     const hf = Math.max(6, Math.min(24, Math.round(config.origami.horizFacets)));
-    const vt = Math.max(3, Math.min(12, Math.round(config.origami.vertTiers)));
+    const vt = Math.max(2, Math.min(12, Math.round(config.origami.vertTiers)));
     // True low-poly flat triangular Yoshimura origami mode (default ON):
     // Exact 2*horizFacets × 2*vertTiers lattice so every diamond face is a pure, dead-flat architectural triangle!
     if (config.origami.realFaceted !== false) {
@@ -46,17 +46,26 @@ export const origamiFamily: LampFamilyDefinition = {
       : Math.max(10, Math.min(16, Math.floor(280 / (2 * hf)) & ~1));
     const uMult = Math.max(8, vMult * 2);
     const radialSegs = Math.min(384, Math.max(80, hf * uMult));
-    const heightSegs = Math.min(240, Math.max(32, vt * vMult));
+    const heightSegs = Math.min(240, Math.max(24, vt * vMult));
     return { radialSegs, heightSegs };
   },
 
   createEvaluator(config: LampConfig) {
-    const { horizFacets, vertTiers, depth, twistDeg, edgeSoftness, wallThickness, realFaceted } =
-      config.origami;
+    const {
+      horizFacets,
+      vertTiers,
+      depth,
+      twistDeg,
+      edgeSoftness,
+      wallThickness,
+      realFaceted,
+      invertFolds,
+    } = config.origami;
     const hf = Math.max(6, Math.min(24, Math.round(horizFacets)));
-    const vt = Math.max(3, Math.min(12, Math.round(vertTiers)));
+    const vt = Math.max(2, Math.min(12, Math.round(vertTiers)));
     const isRealFaceted = realFaceted !== false;
-    const halfDepth = clamp(depth, 3, 16) * 0.5;
+    const dirSign = invertFolds ? -1 : 1; // -1 = inward origami diamonds, +1 = outward crystal/urchin pyramids
+    const halfDepth = clamp(depth, 2.0, 16.0) * 0.5;
     const twistRad = (clamp(twistDeg, 0, 180) * Math.PI) / 180;
     const soft = clamp(edgeSoftness, 0, 1);
     const creaseEps = isRealFaceted ? 0.0005 : 0.008 + soft * 0.077;
@@ -69,14 +78,11 @@ export const origamiFamily: LampFamilyDefinition = {
 
       if (isRealFaceted) {
         // Exact Yoshimura diamond checkerboard lattice on (2*hf) × (2*vt) grid:
-        // At grid vertex (s, row): uPhase = s/2, vPhase = row/2 => uPhase ± vPhase = (s ± row)/2:
-        //  - even (s + row) -> integer -> da=1, db=1 -> -1.0 (crisp inward valley crease!)
-        //  - odd  (s + row) -> half-integer -> da=0, db=0 -> +1.0 (crisp outward diamond apex!)
+        //  - invertFolds = false (+1): outward crystal pyramids ("Erizo / Cristal")
+        //  - invertFolds = true  (-1): inward concave folded origami diamonds ("Origami")
         const da = beveledTriangle01(uPhase + vPhase, creaseEps);
         const db = beveledTriangle01(uPhase - vPhase, creaseEps);
-        const diamondFacet = 1.0 - (da + db); // exact -1..+1 alternating peaks & valleys!
-        // Keep bottom (v=0) and top (v=1) rims cleanly flat on Z=0 for Vase Mode & flush base seating,
-        // reaching 100% full fold depth right on row = 1 .. (2*vt - 1)!
+        const diamondFacet = (1.0 - (da + db)) * dirSign;
         const endFade = ctx.v <= 0.005 || ctx.v >= 0.995 ? 0 : 1;
         return {
           outerOffset: diamondFacet * halfDepth * endFade,
@@ -90,7 +96,7 @@ export const origamiFamily: LampFamilyDefinition = {
       const db = beveledTriangle01(uPhase - vPhase * 0.5, creaseEps);
       const diamondFacet = 1.0 - (da + db);
       const horizFold = 1.0 - 2.0 * beveledTriangle01(vPhase, creaseEps);
-      const folded = clamp(diamondFacet * 0.88 + horizFold * 0.12, -1, 1);
+      const folded = clamp(diamondFacet * 0.88 + horizFold * 0.12, -1, 1) * dirSign;
 
       const endFade = smoothstep(0.015, 0.055, ctx.v) * (1 - smoothstep(0.945, 0.985, ctx.v));
 
