@@ -5,12 +5,16 @@ import {
   BAYONET_DEPTH_MM,
   COMPACT_FLUSH_LUG_DEPTH_MM,
   COMPACT_FLUSH_RIM_HEIGHT_MM,
+  SLENDER_E26_RING_HEIGHT_MM,
+  SLENDER_E26_SHADE_BORE_RADIUS_MM,
+  SLENDER_E26_SHADE_HUB_OUTER_RADIUS_MM,
   THREAD_DEPTH_MM,
   couplingUsesBayonet,
   evaluateFemaleCouplingRadius,
   getCouplingHeightMm,
   getEffectiveNeckRadius,
   getShadeSeatY,
+  isSlenderE26Mode,
 } from './coupling';
 import { getLampFamily } from './registry';
 import {
@@ -525,7 +529,8 @@ function buildCoupledShade(
   const evalWall = createWallEvaluator(config, false);
 
   const isCompactFlush = base.style === 'compact_flush';
-  const isSpider = !isCompactFlush && base.coupling === 'spider';
+  const isSlenderE26 = isSlenderE26Mode(config);
+  const isSpider = !isCompactFlush && (base.coupling === 'spider' || isSlenderE26);
   const rMaleBase = getEffectiveNeckRadius(config);
   const extraCouplingDepth = isCompactFlush
     ? COMPACT_FLUSH_LUG_DEPTH_MM + 0.25
@@ -538,24 +543,26 @@ function buildCoupledShade(
     !isCompactFlush && base.coupling === 'gravity_seat'
       ? Math.max(0.4, base.couplingClearance)
       : clamp(base.couplingClearance, 0.2, 0.65);
-  const rHubOut =
-    rMaleBase + effectiveClr + extraCouplingDepth + Math.max(2.6, wallT + 0.6);
+  const rHubOut = isSlenderE26
+    ? SLENDER_E26_SHADE_HUB_OUTER_RADIUS_MM
+    : rMaleBase + effectiveClr + extraCouplingDepth + Math.max(2.6, wallT + 0.6);
 
   // Optional Organic Wavy Bottom Skirt (0 - 15 mm, 3 - 8 waves; disabled when flush-embedded)
   const waveAmp = isCompactFlush ? 0 : clamp(silhouette.skirtWaveAmp || 0, 0, 15);
   const waveCount = Math.max(3, Math.min(8, Math.round(silhouette.skirtWaveCount || 5)));
   const hasWavySkirt = waveAmp > 0.15;
 
-  // When coupling === 'spider' and skirtWaveAmp === 0, the central bayonet/hub ring and 4 flat spokes
+  // When coupling === 'spider' (or slender_e26) and skirtWaveAmp === 0, the central ring and flat spokes
   // sit FLUSH on Z = 0 .. 3.5 mm directly connected to the shade bottom rim (prints upright 0% supports!).
-  // When base.style === 'compact_flush', deckH = 5.5 mm (matching the Ø75 mm rim counterbore) with D = 1
-  // so row 0 can smoothly lift a 45° rear USB exit arch (0..4.5 mm < 5.5 mm) at theta = 0 with 0 open edges!
+  // In slender_e26 mode, the central ring is strictly 3.5 mm tall with a Ø 40.8 mm inner bore clamped by the E26 nut!
   const deckH = isCompactFlush
     ? COMPACT_FLUSH_RIM_HEIGHT_MM
-    : isSpider && !hasWavySkirt
-      ? 3.5
-      : 3.2;
-  const collarH = getCouplingHeightMm(base);
+    : isSlenderE26
+      ? SLENDER_E26_RING_HEIGHT_MM
+      : isSpider && !hasWavySkirt
+        ? 3.5
+        : 3.2;
+  const collarH = isSlenderE26 ? SLENDER_E26_RING_HEIGHT_MM : getCouplingHeightMm(base);
 
   const sampleBaseR = evaluateSilhouetteRadius(0, silhouette);
   const canVent = isCompactFlush
@@ -576,7 +583,15 @@ function buildCoupledShade(
   const { N, thetas, isSpoke } = layout;
 
   const deckSubdivs = isCompactFlush ? 1 : draft ? 3 : 6;
-  const upperCollarSubdivs = isCompactFlush ? (draft ? 14 : 26) : draft ? 8 : 16;
+  const upperCollarSubdivs = isSlenderE26
+    ? 0
+    : isCompactFlush
+      ? draft
+        ? 14
+        : 26
+      : draft
+        ? 8
+        : 16;
   const D = deckSubdivs;
   const C = deckSubdivs + upperCollarSubdivs;
 
@@ -725,7 +740,9 @@ function buildCoupledShade(
     for (let u = 0; u < N; u++) {
       const theta = thetas[u];
       const yVert = row === 0 ? yWorld + flushCordArchAtTheta(theta) : yWorld;
-      const rInCollar = evaluateFemaleCouplingRadius(rMaleBase, theta, yVert - seatY, base);
+      const rInCollar = isSlenderE26
+        ? SLENDER_E26_SHADE_BORE_RADIUS_MM
+        : evaluateFemaleCouplingRadius(rMaleBase, theta, yVert - seatY, base);
       const safeRIn = Math.min(rInCollar, rHubOut - 1.4);
       hInArr[u] = mb.addCyl(safeRIn, theta, yVert, rHubOut - safeRIn);
       hOutArr[u] = mb.addCyl(rHubOut, theta, yVert, rHubOut - safeRIn);

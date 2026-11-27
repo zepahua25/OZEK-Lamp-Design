@@ -241,7 +241,8 @@ export function kelvinToColor(kelvin: number): THREE.Color {
 
 export function createBacklitLampMaterial(
   presetId: MaterialPresetId,
-  clippingPlanes: THREE.Plane[]
+  clippingPlanes: THREE.Plane[],
+  flatShading = false
 ): {
   material: THREE.MeshPhysicalMaterial;
   uniforms: LampShaderUniforms;
@@ -272,6 +273,7 @@ export function createBacklitLampMaterial(
     metalness: spec.metalness,
     clearcoat: spec.clearcoat,
     clearcoatRoughness: spec.clearcoatRoughness,
+    flatShading,
     transparent: spec.opacity < 0.99,
     opacity: spec.opacity,
     side: THREE.FrontSide,
@@ -394,16 +396,30 @@ export function createBacklitLampMaterial(
         // Smooth radial distance falloff calibrated in millimeters
         float distAtten = 1.0 / (1.0 + 0.00016 * distMm * distMm);
 
-        vec3 wn = normalize(vWorldNormal);
-        float backFacing = clamp(dot(-wn, bulbDir) * 0.55 + 0.45, 0.0, 1.0);
-        float innerLit = clamp(dot(wn, bulbDir), 0.0, 1.0);
-
-        float glowPower =
-          ((thickAtten * uTranslucency + coreBoost) * backFacing +
-            thinWindowBoost * (0.55 + 0.45 * backFacing) +
-            innerLit * 0.58) *
-          distAtten *
-          uBulbIntensity;
+        #ifdef FLAT_SHADED
+          vec3 flatCross = cross(dFdx(vWorldPos), dFdy(vWorldPos));
+          vec3 wn = length(flatCross) > 1e-6 ? normalize(flatCross) : normalize(vWorldNormal);
+          if (!gl_FrontFacing) wn = -wn;
+          // Preserve stark architectural light & shadow planes on flat-shaded Origami facets
+          float backFacing = pow(clamp(dot(-wn, bulbDir) * 0.80 + 0.20, 0.0, 1.0), 1.35);
+          float innerLit = clamp(dot(wn, bulbDir), 0.0, 1.0) * 0.45;
+          float glowPower =
+            ((thickAtten * uTranslucency * 0.65 + coreBoost * 0.45) * backFacing +
+              thinWindowBoost * 0.35 * backFacing +
+              innerLit * 0.35) *
+            distAtten *
+            uBulbIntensity;
+        #else
+          vec3 wn = normalize(vWorldNormal);
+          float backFacing = clamp(dot(-wn, bulbDir) * 0.55 + 0.45, 0.0, 1.0);
+          float innerLit = clamp(dot(wn, bulbDir), 0.0, 1.0);
+          float glowPower =
+            ((thickAtten * uTranslucency + coreBoost) * backFacing +
+              thinWindowBoost * (0.55 + 0.45 * backFacing) +
+              innerLit * 0.58) *
+            distAtten *
+            uBulbIntensity;
+        #endif
         vec3 warmGlow = uBulbColor * mix(uGlowTint, vec3(1.0, 0.86, 0.56), thinWindowBoost * 0.55) * glowPower * 1.55;
         totalEmissiveRadiance += warmGlow;`
       )
@@ -418,7 +434,8 @@ export function createBacklitLampMaterial(
       );
   };
 
-  material.customProgramCacheKey = () => 'ozek-backlit-lamp-v4-strands';
+  material.customProgramCacheKey = () =>
+    material.flatShading ? 'ozek-backlit-lamp-v4-strands-flat' : 'ozek-backlit-lamp-v4-strands';
 
   return { material, uniforms };
 }

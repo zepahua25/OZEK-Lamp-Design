@@ -24,9 +24,18 @@ export const COMPACT_FLUSH_LUG_Y_END = 12.3;
 export const COMPACT_FLUSH_TWIST_Y_LOW = 6.1;
 export const COMPACT_FLUSH_TWIST_Y_HIGH = 13.8;
 
-/** Slender hollow stem ("palito") outer/inner radii for E26/E27 elevated Dome bases (Ø 30 mm outer / Ø 18 mm inner) */
-export const DOME_STEM_OUTER_RADIUS_MM = 15.0;
-export const DOME_STEM_INNER_RADIUS_MM = 9.0;
+/**
+ * Slender E26/E27 direct-nut neck ("Cuello Esbelto E26/E27", OMOI 01):
+ *  - Hollow cylindrical stem Ø 17.0 mm outer (r = 8.5 mm) / Ø 9.0 mm cable bore (r = 4.5 mm), default 16 mm tall
+ *  - 45° self-supporting flare strictly up to the compact E26/E27 socket ring: Ø 46.0 mm outer (r = 23.0 mm) / Ø 40.5 mm inner hole
+ *  - Shade flat Z=0 spider closes to a Ø 40.8 mm central ring (r = 20.4 mm) clamped directly by the E26/E27 threaded nut!
+ */
+export const DOME_STEM_OUTER_RADIUS_MM = 8.5; // Ø 17.0 mm exterior
+export const DOME_STEM_INNER_RADIUS_MM = 4.5; // Ø 9.0 mm cable bore
+export const SLENDER_E26_SOCKET_OUTER_RADIUS_MM = 23.0; // Ø 46.0 mm compact E26/E27 socket ring outer
+export const SLENDER_E26_RING_HEIGHT_MM = 3.5; // 3.5 mm flat E26/E27 seating ring (0% supports)
+export const SLENDER_E26_SHADE_BORE_RADIUS_MM = 20.4; // Ø 40.8 mm spider inner ring clamped by E26 nut
+export const SLENDER_E26_SHADE_HUB_OUTER_RADIUS_MM = 24.4; // Ø 48.8 mm spider hub outer (4.0 mm solid clamping flange)
 
 /**
  * Bayonet vertical geometry constants (mm, localY from collar bottom = 0):
@@ -49,8 +58,19 @@ function smoothstep(e0: number, e1: number, x: number): number {
   return t * t * (3 - 2 * t);
 }
 
+/** True when "Cuello Esbelto E26/E27" direct-nut coupling is active (requires E26/E27 mount). */
+export function isSlenderE26Mode(config: LampConfig): boolean {
+  return (
+    config.mount.type === 'e26_e27' &&
+    config.base.style !== 'compact_flush' &&
+    (config.base.coupling === 'slender_e26' ||
+      (config.base.style === 'dome' && (config.base.domeStemHeightMm ?? 0) > 0.1))
+  );
+}
+
 /** Whether the current coupling uses bayonet locking lugs (Compact Flush, direct Bayonet, or Spider+Bayonet). */
 export function couplingUsesBayonet(base: BaseParams): boolean {
+  if (base.coupling === 'slender_e26') return false;
   return (
     base.style === 'compact_flush' ||
     base.coupling === 'bayonet' ||
@@ -61,6 +81,7 @@ export function couplingUsesBayonet(base: BaseParams): boolean {
 /** Active vertical engagement height of the Base-to-Shade coupling collar. */
 export function getCouplingHeightMm(base: BaseParams): number {
   if (base.style === 'compact_flush') return COMPACT_FLUSH_HEIGHT_MM;
+  if (base.coupling === 'slender_e26') return SLENDER_E26_RING_HEIGHT_MM;
   return base.coupling === 'gravity_seat' ? GRAVITY_STEP_HEIGHT_MM : COUPLING_HEIGHT_MM;
 }
 
@@ -72,6 +93,9 @@ export function getEffectiveNeckRadius(config: LampConfig): number {
   const { mount, base } = config;
   if (base.style === 'compact_flush') {
     return COMPACT_FLUSH_COLLAR_RADIUS_MM;
+  }
+  if (isSlenderE26Mode(config)) {
+    return SLENDER_E26_SOCKET_OUTER_RADIUS_MM;
   }
   if (mount.type === 'led_kit_001') {
     const led = getLedKit001Dimensions(mount);
@@ -86,26 +110,25 @@ export function getEffectiveNeckRadius(config: LampConfig): number {
 }
 
 /**
- * Active elevated hollow stem height (mm) on Dome bases (0 - 22 mm).
+ * Active elevated hollow stem height (mm) on Dome bases (0 - 22 mm; default 16 mm for slender_e26).
  * Automatically disabled (0 mm) whenever Bambu LED Kit 001 (Ø 59.7 mm) is selected.
  */
 export function getEffectiveDomeStemHeightMm(config: LampConfig): number {
   if (config.base.style !== 'dome' || config.mount.type !== 'e26_e27') {
     return 0;
   }
-  return clamp(config.base.domeStemHeightMm ?? 0, 0, 22);
+  const fallback = config.base.coupling === 'slender_e26' ? 16 : 0;
+  return clamp(config.base.domeStemHeightMm ?? fallback, 0, 22);
 }
 
 /**
- * Computes the vertical 45° self-supporting flare height (mm) above the slender Ø 30 mm dome stem
- * up to the E26/E27 mounting collar shoulder.
+ * Computes the vertical 45° self-supporting flare height (mm) above the slender Ø 17 mm dome stem
+ * strictly up to the compact Ø 46 mm E26/E27 socket ring (14.5 mm => exact 45°).
  */
 export function getDomeStemFlareHeightMm(config: LampConfig): number {
   const stemH = getEffectiveDomeStemHeightMm(config);
   if (stemH <= 0.1) return 0;
-  const rNeck = getEffectiveNeckRadius(config);
-  const rShoulder = rNeck + (config.base.coupling === 'gravity_seat' ? 4.5 : 2.5);
-  return Math.max(4, Math.ceil(Math.max(0, rShoulder - DOME_STEM_OUTER_RADIUS_MM)));
+  return Math.max(4, SLENDER_E26_SOCKET_OUTER_RADIUS_MM - DOME_STEM_OUTER_RADIUS_MM);
 }
 
 /**
@@ -128,7 +151,7 @@ export function getShadeSeatY(config: LampConfig): number {
     const domeH = Math.max(36, base.height);
     const stemH = getEffectiveDomeStemHeightMm(config);
     if (stemH > 0.1) {
-      return domeH + stemH + getDomeStemFlareHeightMm(config);
+      return domeH + stemH + getDomeStemFlareHeightMm(config) + SLENDER_E26_RING_HEIGHT_MM;
     }
     return domeH;
   }

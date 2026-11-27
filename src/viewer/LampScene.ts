@@ -281,7 +281,12 @@ export class LampScene {
             ? config.visual.baseMaterial
             : config.visual.material;
 
-      const { material, uniforms } = createBacklitLampMaterial(presetId, activeClip);
+      const useFlatShading = part.role === 'shade' && config.family === 'origami';
+      const { material, uniforms } = createBacklitLampMaterial(
+        presetId,
+        activeClip,
+        useFlatShading
+      );
       if (this.sectionCutEnabled) {
         material.side = THREE.DoubleSide;
       }
@@ -433,6 +438,11 @@ export class LampScene {
           : entry.role === 'base' && isTwoPart
             ? visual.baseMaterial
             : visual.material;
+      const wantFlat = entry.role === 'shade' && config.family === 'origami';
+      if (entry.material.flatShading !== wantFlat) {
+        entry.material.flatShading = wantFlat;
+        entry.material.needsUpdate = true;
+      }
       applyMaterialPreset(entry.material, entry.uniforms, presetId);
       entry.uniforms.uBulbPos.value.copy(lightPos);
       entry.uniforms.uBulbColor.value.copy(bulbColor);

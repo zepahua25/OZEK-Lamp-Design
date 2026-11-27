@@ -46,8 +46,9 @@ export interface OzekSignaturePiece {
 
 /**
  * 1) OMOI 01 · 思い (Intención y Origen)
- * Plisado fino japonés (72 pliegues, 1.1 mm Arena), Falda = 0 mm, araña plana Z=0 estilo Orgánico,
- * Base cúpula acanalada Gris Ónice + cuello elevado (14 mm · E26/E27) + sello trasero Z☰, talla S (150 mm).
+ * Plisado fino japonés (72 pliegues, 1.1 mm Arena), Falda = 0 mm, araña plana Z=0 con anillo central Ø 40.8 mm
+ * sujetado directo con la tuerca E26/E27 sobre Cuello Esbelto real (Ø 17 mm × 16 mm, ensanche 45° a Ø 46 / Ø 40.5 mm)
+ * y Base cúpula acanalada Gris Ónice + sello trasero Z☰ sobre el arco del cable, talla S (150 mm).
  */
 function buildOmoi01(): LampConfig {
   const cfg = cloneConfig(DEFAULT_CONFIG);
@@ -73,14 +74,14 @@ function buildOmoi01(): LampConfig {
   cfg.base.style = 'dome';
   cfg.base.finish = 'ribbed';
   cfg.base.ribCount = 68;
-  cfg.base.height = 54; // 54 dome + 14 stem + 16 45°-flare = 84 seatY => 84 + 150 = 234 mm (<= 245 mm A1!)
-  cfg.base.domeStemHeightMm = 14;
+  cfg.base.height = 52; // 52 dome + 16 stem (Ø17) + 14.5 45°-flare + 3.5 E26 ring = 86 seatY => 86 + 150 = 236 mm (<= 245 mm A1!)
+  cfg.base.domeStemHeightMm = 16;
   cfg.base.footRadius = 60;
-  cfg.base.neckRadius = 28.5;
-  cfg.base.coupling = 'spider';
+  cfg.base.neckRadius = 23.0;
+  cfg.base.coupling = 'slender_e26';
   cfg.base.spiderStyle = 'organic_ovals';
   cfg.base.spiderArmCount = 5;
-  cfg.base.spiderBayonet = true;
+  cfg.base.spiderBayonet = false;
   cfg.base.signatureGrooves = false;
   cfg.base.authorSeal = true;
   cfg.base.collarRevealMm = 0;
@@ -100,36 +101,37 @@ function buildOmoi01(): LampConfig {
 
 /**
  * 2) ZOUKEI 02 · 造形 (Dar forma y Esculpir)
- * Linterna Origami chōchin (12 facetas × 5 niveles diamante nítidos, 1.0 mm Arena, Modo Jarrón 0% soportes),
- * abierta arriba y abajo, talla M (170 mm) sobre Base Compacta al ras (15 mm) Gris Ónice con LED Kit 001 y sello Z☰.
+ * Linterna Origami chōchin ovalada (~140 × 180 mm, 10 facetas × 4 niveles diamante marcados 11 mm,
+ * edgeSoftness 0.08, pared 1.0 mm Arena, Modo Jarrón 0% soportes), abierta arriba y abajo,
+ * sobre Base Compacta al ras (15 mm) Gris Ónice con LED Kit 001 y sello trasero Z☰.
  */
 function buildZoukei02(): LampConfig {
   const cfg = cloneConfig(DEFAULT_CONFIG);
   cfg.family = 'origami';
   cfg.silhouette.type = 'custom_spline';
-  cfg.silhouette.height = 170; // Talla M (170 mm)
+  cfg.silhouette.height = 180; // Chōchin ovalada más alta que ancha (~140 × 180 mm)
   cfg.silhouette.shadeScale = 1.0;
   cfg.silhouette.controlPoints = [
-    { v: 0.0, r: 52 },
-    { v: 0.25, r: 82 },
-    { v: 0.5, r: 90 },
-    { v: 0.75, r: 82 },
-    { v: 1.0, r: 52 },
+    { v: 0.0, r: 46 },
+    { v: 0.25, r: 65 },
+    { v: 0.5, r: 70 },
+    { v: 0.75, r: 65 },
+    { v: 1.0, r: 46 },
   ];
-  cfg.silhouette.baseRadius = 52;
-  cfg.silhouette.midRadius = 90;
-  cfg.silhouette.topRadius = 52;
+  cfg.silhouette.baseRadius = 46;
+  cfg.silhouette.midRadius = 70;
+  cfg.silhouette.topRadius = 46;
   cfg.silhouette.crossSectionType = 'circle';
   cfg.silhouette.skirtWaveAmp = 0;
   cfg.silhouette.closeTopDome = false; // Abierta limpia arriba y abajo -> 100% Modo Jarrón sin soportes!
   cfg.silhouette.includeDiffuser = false;
   cfg.silhouette.buildMode = 'two_part';
 
-  cfg.origami.horizFacets = 12;
-  cfg.origami.vertTiers = 5;
-  cfg.origami.depth = 9.5;
+  cfg.origami.horizFacets = 10;
+  cfg.origami.vertTiers = 4;
+  cfg.origami.depth = 11.0; // Pliegues geométricos profundos y escultóricos (10–12 mm)
   cfg.origami.twistDeg = 0;
-  cfg.origami.edgeSoftness = 0.08; // Aristas de diamante nítidas con bisel FDM muy sutil!
+  cfg.origami.edgeSoftness = 0.08; // Aristas vivas con mínimo bisel FDM
   cfg.origami.wallThickness = 1.0; // Pared translúcida 1.0 mm Modo Jarrón
 
   cfg.base.style = 'compact_flush';
@@ -150,7 +152,7 @@ function buildZoukei02(): LampConfig {
   cfg.visual.baseMaterial = 'ozek_onyx';
   cfg.visual.colorMode = 'solid';
   cfg.visual.lightOn = true;
-  cfg.visual.lightIntensity = 1.6;
+  cfg.visual.lightIntensity = 1.0;
   cfg.visual.lightWarmth = 2650;
   cfg.sculptStrokes = [];
   return cfg;
@@ -158,7 +160,7 @@ function buildZoukei02(): LampConfig {
 
 /**
  * 3) EN 03 · 円 / ☰ (Plenitud y Congruencia)
- * Torre arquitectónica helicoidal fina (56 pliegues, torsión 105°) sobre silueta Reloj de Arena esbelta
+ * Torre arquitectónica helicoidal marcada (48 pliegues profundos 3.8 mm, espiral real 240°) sobre silueta Reloj de Arena esbelta
  * con Cinturón ☰ (3 anillos en cintura), Pantalla Cobre (#C87D55), Base baja Gris Ónice (28 mm) + sello Z☰, talla L (205 mm).
  */
 function buildEn03(): LampConfig {
@@ -183,9 +185,9 @@ function buildEn03(): LampConfig {
   cfg.silhouette.includeDiffuser = false;
   cfg.silhouette.buildMode = 'two_part';
 
-  cfg.helical.ribCount = 56;
-  cfg.helical.ribDepth = 3.0;
-  cfg.helical.twistDeg = 105;
+  cfg.helical.ribCount = 48;
+  cfg.helical.ribDepth = 3.8;
+  cfg.helical.twistDeg = 240;
   cfg.helical.twistDirection = 1;
   cfg.helical.profile = 'sawtooth';
   cfg.helical.doubleProfile = false;
@@ -218,25 +220,26 @@ function buildEn03(): LampConfig {
 
 /**
  * 4) KŌBŌ 04 · 工房 (Taller de Autor)
- * RippleMesh profundo abierto (20 ondas radiales × 16 filas, 5.5 mm) en Gris Ónice (#252525) con acento Cobre (#C87D55)
+ * Silueta trapezoidal arquitectónica con hombro diagonal a 45° (nace angosta en v=0.0, abre a máximo en v=0.22 y sube cónica)
+ * + RippleMesh abierto (18 ondas radiales × 14 filas, 5.5 mm) en Gris Ónice (#252525) con acento Cobre (#C87D55)
  * + Doble Difusor Interno visible (1.0 mm Arena #F5F2EB), Base Gris Ónice con sello trasero Z☰, talla M (175 mm · E26/E27).
  */
 function buildKobo04(): LampConfig {
   const cfg = cloneConfig(DEFAULT_CONFIG);
   cfg.family = 'woven';
   cfg.silhouette.type = 'custom_spline';
-  cfg.silhouette.height = 175; // Talla M (175 mm) -> 175 + 42 + 4 = 221 mm (<= 245 mm A1!)
+  cfg.silhouette.height = 175; // Talla M (175 mm) -> 175 + 38 + 4 = 217 mm (<= 245 mm A1!)
   cfg.silhouette.shadeScale = 1.0;
   cfg.silhouette.controlPoints = [
-    { v: 0.0, r: 58 },
-    { v: 0.22, r: 74 },
-    { v: 0.54, r: 76 },
-    { v: 0.82, r: 68 },
-    { v: 1.0, r: 56 },
+    { v: 0.0, r: 47 },
+    { v: 0.22, r: 80 }, // Hombro diagonal a ~41° (<= 45°, 0% soportes!)
+    { v: 0.55, r: 74 },
+    { v: 0.85, r: 66 },
+    { v: 1.0, r: 62 },
   ];
-  cfg.silhouette.baseRadius = 58;
-  cfg.silhouette.midRadius = 76;
-  cfg.silhouette.topRadius = 56;
+  cfg.silhouette.baseRadius = 47;
+  cfg.silhouette.midRadius = 74;
+  cfg.silhouette.topRadius = 62;
   cfg.silhouette.crossSectionType = 'circle';
   cfg.silhouette.skirtWaveAmp = 0;
   cfg.silhouette.closeTopDome = false;
@@ -244,15 +247,16 @@ function buildKobo04(): LampConfig {
   cfg.silhouette.buildMode = 'two_part';
 
   cfg.woven.pattern = 'ripple_mesh';
-  cfg.woven.horizFreq = 20;
-  cfg.woven.vertFreq = 16;
+  cfg.woven.horizFreq = 18;
+  cfg.woven.vertFreq = 14;
   cfg.woven.rippleDepth = 5.5;
   cfg.woven.fdmSmoothing = 0.35;
 
   cfg.base.style = 'cylinder';
   cfg.base.finish = 'smooth';
-  cfg.base.height = 42;
-  cfg.base.footRadius = 56;
+  cfg.base.height = 38;
+  cfg.base.footRadius = 46;
+  cfg.base.neckRadius = 28.5;
   cfg.base.coupling = 'bayonet';
   cfg.base.bayonetLugs = 3;
   cfg.base.couplingClearance = 0.35;
@@ -281,10 +285,10 @@ export const OZEK_SIGNATURE_COLLECTION: OzekSignaturePiece[] = [
     kanji: '思い',
     title: 'Intención y Origen',
     narrative: 'Luz serena y proporción pura; plisado fino japonés sin deslumbramiento.',
-    subtitle: 'Plisado 72 (1.1 mm) · Cuello elevado 14 mm E26 · S 150 mm',
+    subtitle: 'Plisado 72 (1.1 mm) · Cuello esbelto Ø17 mm E26 · S 150 mm',
     badge: '0% soportes',
     dfmSupportNote:
-      'OMOI 01: 0% soportes en Base Cúpula con cuello elevado E26/E27 (ensanche a 45°) y Pantalla (araña plana en Z = 0).',
+      'OMOI 01: 0% soportes en Base Cúpula con Cuello Esbelto Ø17 mm (ensanche 45° a anillo E26 Ø46 / Ø40.5 mm) y Pantalla (araña plana Z = 0 con aro Ø40.8 mm fijado con tuerca E26).',
     swatches: ['#F5F2EB', '#252525'],
     config: buildOmoi01(),
   },
@@ -294,10 +298,10 @@ export const OZEK_SIGNATURE_COLLECTION: OzekSignaturePiece[] = [
     kanji: '造形',
     title: 'Dar forma y Esculpir',
     narrative: 'Linterna escultórica en pliegues de origami; luz y sombra arquitectónica en Modo Jarrón.',
-    subtitle: 'Origami 12×5 (1.0 mm Arena) · Base Al Ras 15 mm · M 170 mm',
+    subtitle: 'Origami 10×4 (11 mm · Arena) · Base Al Ras 15 mm · 140×180 mm',
     badge: '0% soportes · Modo Jarrón',
     dfmSupportNote:
-      'ZOUKEI 02: 0% soportes en Base Compacta al ras (15 mm) y Linterna Origami (abierta arriba/abajo, ideal en Modo Jarrón o 2 paredes finas de 1.0 mm).',
+      'ZOUKEI 02: 0% soportes en Base Compacta al ras (15 mm) y Linterna Origami 10×4 (abierta arriba/abajo, ideal en Modo Jarrón o pared fina 1.0 mm).',
     swatches: ['#F5F2EB', '#252525'],
     config: buildZoukei02(),
   },
@@ -307,10 +311,10 @@ export const OZEK_SIGNATURE_COLLECTION: OzekSignaturePiece[] = [
     kanji: '円 / ☰',
     title: 'Plenitud y Congruencia',
     narrative: 'Torre arquitectónica helicoidal ceñida por el trigrama ☰.',
-    subtitle: 'Reloj de Arena 56 pliegues (105°) + Cinturón ☰ · L 205 mm',
+    subtitle: 'Reloj de Arena 48 pliegues (240°) + Cinturón ☰ · L 205 mm',
     badge: '0% soportes',
     dfmSupportNote:
-      'EN 03: 0% soportes en Base y Pantalla (torsión helicoidal 105° y cinturón ☰ de 3 anillos con flancos ≤ 45°).',
+      'EN 03: 0% soportes en Base y Pantalla (espiral helicoidal 240° y cinturón ☰ de 3 anillos con flancos ≤ 45°).',
     swatches: ['#C87D55', '#252525'],
     config: buildEn03(),
   },
@@ -320,10 +324,10 @@ export const OZEK_SIGNATURE_COLLECTION: OzekSignaturePiece[] = [
     kanji: '工房',
     title: 'Taller de Autor',
     narrative: 'Artesanía táctil con doble profundidad luminosa.',
-    subtitle: 'RippleMesh 20×16 (5.5 mm) + Difusor Arena 1 mm · M 175 mm',
+    subtitle: 'Trapezoide 45° · RippleMesh 18×14 + Difusor Arena · M 175 mm',
     badge: '0% soportes · Doble difusor',
     dfmSupportNote:
-      'KŌBŌ 04: 0% soportes en Base, Pantalla RippleMesh abierta (20×16 celdas) y Difusor Interno (1.0 mm Arena). Compatible con E26/E27 o Adaptador LED Kit 001.',
+      'KŌBŌ 04: 0% soportes en Base, Pantalla trapezoidal con hombro a 45° (RippleMesh 18×14 abierto) y Difusor Interno (1.0 mm Arena).',
     swatches: ['#252525', '#C87D55'],
     config: buildKobo04(),
   },

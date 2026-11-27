@@ -29,7 +29,13 @@ export type BaseStyleId = 'dome' | 'pedestal' | 'cylinder' | 'conkel' | 'tripod'
 
 export type BaseFinish = 'smooth' | 'ribbed';
 
-export type CouplingType = 'gravity_seat' | 'spider' | 'thread' | 'bayonet' | 'friction';
+export type CouplingType =
+  | 'gravity_seat'
+  | 'spider'
+  | 'slender_e26'
+  | 'thread'
+  | 'bayonet'
+  | 'friction';
 
 export type ViewAssemblyMode = 'assembled' | 'exploded' | 'shade_only' | 'base_only';
 

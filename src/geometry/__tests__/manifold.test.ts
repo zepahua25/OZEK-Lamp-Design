@@ -25,7 +25,10 @@ import {
   COMPACT_FLUSH_OUTER_RADIUS_MM,
   COMPACT_FLUSH_TWIST_Y_HIGH,
   COMPACT_FLUSH_TWIST_Y_LOW,
+  DOME_STEM_INNER_RADIUS_MM,
   DOME_STEM_OUTER_RADIUS_MM,
+  SLENDER_E26_SHADE_BORE_RADIUS_MM,
+  SLENDER_E26_SOCKET_OUTER_RADIUS_MM,
   evaluateFemaleCouplingRadius,
   evaluateMaleCouplingOffset,
   getEffectiveDomeStemHeightMm,
@@ -279,7 +282,14 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
     'tripod',
     'compact_flush',
   ];
-  const couplings: CouplingType[] = ['gravity_seat', 'spider', 'thread', 'bayonet', 'friction'];
+  const couplings: CouplingType[] = [
+    'gravity_seat',
+    'spider',
+    'slender_e26',
+    'thread',
+    'bayonet',
+    'friction',
+  ];
 
   it('maintains 100% watertight manifold topology across all 5 Base styles (45° vaults & gable cord slot) × 5 Couplings × LED 001 & E26/E27', () => {
     for (const style of baseStyles) {
@@ -1244,9 +1254,9 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
   it('FIX-L — scales shade parametrically across XS/S/M/L/XL (125–235 mm) + 75–140% continuous scale with 100% FIXED base, socket & coupling', () => {
     const sizes: LampSizePreset[] = ['XS', 'S', 'M', 'L', 'XL'];
 
-    // 1. ZEN 02 Organic Sphere + Compact Flush Ø75 × 15 mm + LED Kit 001 Ø59.7 mm + Bayonet Ø74.2 mm
+    // 1. ZOUKEI 02 Origami Chōchin (~140 × 180 mm) + Compact Flush Ø75 × 15 mm + LED Kit 001 Ø59.7 mm + Bayonet Ø74.2 mm
     const zenOrig = cloneConfig(OZEK_SIGNATURE_COLLECTION.find((p) => p.id === 'zoukei-02')!.config);
-    expect(zenOrig.silhouette.height).toBe(SHADE_SIZE_PRESETS.M.heightMm);
+    expect(zenOrig.silhouette.height).toBe(180);
 
     for (const size of sizes) {
       const scaled = applySizePreset(zenOrig, size);
@@ -1378,67 +1388,80 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
       expect(guide).toContain('LED');
     }
 
-    // 1. Verify rear Hanko Z☰ is UNMIRRORED in 3D world space (diagonal runs top-right `/` bottom-left when viewed from outside +X):
-    //    Looking from (+R, y, 0) toward origin with +Y up, RIGHT is -Z (+theta) and LEFT is +Z (-theta)!
+    // 1. Verify rear Hanko Z☰ is UNMIRRORED in 3D world space AND positioned right above the cable arch (gableClearY + 1.5 mm)!
     const sealSpec = {
       centerTheta: 0,
-      yCenter: 26,
-      widthMm: 14,
-      heightMm: 16,
+      yCenter: 16.75,
+      widthMm: 11.0,
+      heightMm: 12.5,
       depthMm: 0.6,
-      refRadiusMm: 56,
+      refRadiusMm: 46,
     };
-    // SDF check: between top bar (k=0, y=+3.66) and bar 1 (k=1, y=+1.22), gap midpoint is v = +2.44 mm;
-    // Z diagonal crosses at u = +1.8 mm (upper-right) and NOT u = -1.8 mm (upper-left)!
-    expect(evaluateHankoSealDepthMm(1.8, 2.44, sealSpec), 'Z☰ diagonal passes upper-right (+u,+v)').toBeGreaterThan(0.35);
-    expect(evaluateHankoSealDepthMm(-1.8, 2.44, sealSpec), 'Z☰ upper-left gap (-u,+v) is raised').toBeLessThan(0.05);
-    expect(evaluateHankoSealDepthMm(-1.8, -2.44, sealSpec), 'Z☰ diagonal passes lower-left (-u,-v)').toBeGreaterThan(0.35);
-    expect(evaluateHankoSealDepthMm(1.8, -2.44, sealSpec), 'Z☰ lower-right gap (+u,-v) is raised').toBeLessThan(0.05);
+    // SDF check for 11.0 × 12.5 mm seal: gap between top bar (k=0) and bar 1 (k=1) is at v = +1.82 mm;
+    // Z diagonal passes upper-right (+1.33, +1.82) & lower-left (-1.33, -1.82), leaving (-1.33, +1.82) raised!
+    expect(evaluateHankoSealDepthMm(1.33, 1.82, sealSpec), 'Z☰ diagonal passes upper-right (+u,+v)').toBeGreaterThan(0.35);
+    expect(evaluateHankoSealDepthMm(-1.33, 1.82, sealSpec), 'Z☰ upper-left gap (-u,+v) is raised').toBeLessThan(0.05);
+    expect(evaluateHankoSealDepthMm(-1.33, -1.82, sealSpec), 'Z☰ diagonal passes lower-left (-u,-v)').toBeGreaterThan(0.35);
+    expect(evaluateHankoSealDepthMm(1.33, -1.82, sealSpec), 'Z☰ lower-right gap (+u,-v) is raised').toBeLessThan(0.05);
 
-    // 3D base mesh check on KŌBŌ 04 (smooth cylinder r = 56 mm, seal centered at theta=0, yCenter = (9 + 40)/2 = 24.5 mm):
+    // 3D base mesh check on KŌBŌ 04 (smooth cylinder r = 46 mm, drumH = 38 mm, seal lowered right above cable arch: yCenter = 16.75 mm):
     const kobo04 = cloneConfig(OZEK_SIGNATURE_COLLECTION.find((p) => p.id === 'kobo-04')!.config);
-    expect(kobo04.woven.horizFreq).toBe(20);
-    expect(kobo04.woven.vertFreq).toBe(16);
+    expect(kobo04.woven.horizFreq).toBe(18);
+    expect(kobo04.woven.vertFreq).toBe(14);
     expect(kobo04.woven.rippleDepth).toBeCloseTo(5.5, 2);
     expect(kobo04.silhouette.includeDiffuser).toBe(true);
+    // Trapezoidal 45° shoulder silhouette check: narrow base (v=0) -> max shoulder at v=0.22 -> slight inward taper to v=1.0
+    expect(kobo04.silhouette.controlPoints[0].r).toBeLessThan(52);
+    expect(kobo04.silhouette.controlPoints[1].v).toBeCloseTo(0.22, 2);
+    expect(kobo04.silhouette.controlPoints[1].r).toBeGreaterThan(kobo04.silhouette.controlPoints[0].r + 25);
+    expect(kobo04.silhouette.controlPoints[4].r).toBeLessThan(kobo04.silhouette.controlPoints[1].r);
+
     const koboRes = generateLampGeometry(kobo04, { draft: false, validateManifold: true });
     expect(koboRes.parts, 'KŌBŌ 04 has Base + Diffuser + Shade').toHaveLength(3);
     const koboBase = koboRes.parts.find((p) => p.role === 'base')!;
-    const yCenterKobo = (9.0 + (kobo04.base.height - 2.0)) * 0.5;
+    const yCenterKobo = 9.0 + 1.5 + 12.5 * 0.5; // 16.75 mm (just above gableClearY = 9.0 mm!)
     let upperRightDebossed = 0; // screen upper-right = z < 0, y > yCenter
     let upperLeftDebossed = 0; // screen upper-left  = z > 0, y > yCenter (must be empty gap!)
+    let highWallDebossed = 0; // above seal top (y > 25 mm) should have 0 deboss (confirming seal sits low above arch!)
     for (let i = 0; i < koboBase.positions.length; i += 3) {
       const x = koboBase.positions[i];
       const y = koboBase.positions[i + 1];
       const z = koboBase.positions[i + 2];
-      if (x <= 40) continue;
+      if (x <= 35) continue;
       const dy = y - yCenterKobo;
       const r = Math.hypot(x, z);
-      const isDebossed = r < 56 - 0.35;
-      if (dy > 2.2 && dy < 2.7) {
-        if (z < -1.3 && z > -2.3 && isDebossed) upperRightDebossed++;
-        if (z > 1.3 && z < 2.3 && isDebossed) upperLeftDebossed++;
+      const isDebossed = r < 46 - 0.35;
+      if (y > 25 && y < 36 && Math.abs(z) < 7 && isDebossed) highWallDebossed++;
+      if (dy > 1.65 && dy < 2.0) {
+        if (z < -0.95 && z > -1.75 && isDebossed) upperRightDebossed++;
+        if (z > 0.95 && z < 1.75 && isDebossed) upperLeftDebossed++;
       }
     }
     expect(upperRightDebossed, 'KŌBŌ 04 rear Z☰ diagonal debossed at upper-right (z < 0)').toBeGreaterThan(0);
     expect(upperLeftDebossed, 'KŌBŌ 04 rear Z☰ upper-left (z > 0) stays un-debossed (not mirrored!)').toBe(0);
+    expect(highWallDebossed, 'KŌBŌ 04 rear Z☰ sits low just above cable arch (not at top wall)').toBe(0);
 
-    // 2. Verify ZOUKEI 02 · 造形 is Origami Vase-Mode Chōchin (12×5, 1.0 mm Arena, open top/bottom, Compact Flush 15 mm Gris Ónice)
+    // 2. Verify ZOUKEI 02 · 造形 is Origami Vase-Mode Chōchin (10×4, 11 mm depth, 0.08 crispness, ~140×180 mm, Compact Flush 15 mm)
     const zoukeiPiece = OZEK_SIGNATURE_COLLECTION.find((p) => p.id === 'zoukei-02')!;
     expect(zoukeiPiece.config.family).toBe('origami');
-    expect(zoukeiPiece.config.origami.horizFacets).toBe(12);
-    expect(zoukeiPiece.config.origami.vertTiers).toBe(5);
+    expect(zoukeiPiece.config.origami.horizFacets).toBe(10);
+    expect(zoukeiPiece.config.origami.vertTiers).toBe(4);
+    expect(zoukeiPiece.config.origami.depth).toBeGreaterThanOrEqual(10);
+    expect(zoukeiPiece.config.origami.depth).toBeLessThanOrEqual(12);
+    expect(zoukeiPiece.config.origami.edgeSoftness).toBeCloseTo(0.08, 2);
     expect(zoukeiPiece.config.origami.wallThickness).toBeCloseTo(1.0, 2);
+    expect(zoukeiPiece.config.silhouette.height).toBe(180);
     expect(zoukeiPiece.config.silhouette.closeTopDome).toBe(false);
     expect(zoukeiPiece.config.base.style).toBe('compact_flush');
     expect(zoukeiPiece.config.visual.material).toBe('ozek_sand');
     expect(zoukeiPiece.config.visual.baseMaterial).toBe('ozek_onyx');
     expect(zoukeiPiece.badge).toContain('Modo Jarrón');
 
-    // 3. Verify EN 03 · 円 / ☰ real helical twist (105°, 56 ribs) + 3-ring Obi belt ("☰") geometry
+    // 3. Verify EN 03 · 円 / ☰ real helical spiral (240°, 48 ribs, 3.8 mm depth) + 3-ring Obi belt ("☰") geometry
     const en03 = cloneConfig(OZEK_SIGNATURE_COLLECTION.find((p) => p.id === 'en-03')!.config);
-    expect(en03.helical.twistDeg).toBe(105);
-    expect(en03.helical.ribCount).toBe(56);
+    expect(en03.helical.twistDeg).toBe(240);
+    expect(en03.helical.ribCount).toBe(48);
+    expect(en03.helical.ribDepth).toBeCloseTo(3.8, 2);
     expect(en03.helical.obiBelt).toBe(true);
     const evalEn03 = helicalFamily.createEvaluator(en03);
     const H = en03.silhouette.height;
@@ -1460,25 +1483,56 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
       expect(sampleOffsetAtYWaist(val), `EN 03 Obi ring valley at ${val} mm`).toBeLessThan(1.05);
     }
 
-    // 4. Verify OMOI 01 · 思い elevated slender neck ("palito") on Dome Base for E26/E27 (and auto-disable on LED Kit 001!)
+    // 4. Verify OMOI 01 · 思い real slender neck ("Cuello Esbelto E26/E27"):
+    //    Ø 17 mm outer / Ø 9 mm inner tube (16 mm tall) -> 45° flare ONLY to Ø 46 / Ø 40.5 mm E26 ring (NO wide Ø73 bayonet!)
+    //    + flat Z=0 spider shade closing to exact Ø 40.8 mm central ring clamped by E26 nut!
     const omoi01 = cloneConfig(OZEK_SIGNATURE_COLLECTION.find((p) => p.id === 'omoi-01')!.config);
     expect(omoi01.base.style).toBe('dome');
+    expect(omoi01.base.coupling).toBe('slender_e26');
     expect(omoi01.mount.type).toBe('e26_e27');
-    expect(omoi01.base.domeStemHeightMm).toBe(14);
-    expect(getEffectiveDomeStemHeightMm(omoi01)).toBe(14);
-    expect(getShadeSeatY(omoi01)).toBe(84); // 54 dome + 14 stem + 16 45°-flare = 84 mm
+    expect(omoi01.base.domeStemHeightMm).toBe(16);
+    expect(getEffectiveDomeStemHeightMm(omoi01)).toBe(16);
+    expect(getShadeSeatY(omoi01)).toBe(86); // 52 dome + 16 stem + 14.5 45°-flare + 3.5 E26 ring = 86 mm
 
     const omoiRes = generateLampGeometry(omoi01, { draft: true, validateManifold: true });
     const omoiBase = omoiRes.parts.find((p) => p.role === 'base')!;
-    let slenderStemVerts = 0;
+    const omoiShade = omoiRes.parts.find((p) => p.role === 'shade')!;
+    let stemOuterVerts = 0;
+    let stemInnerVerts = 0;
+    let topMaxRadiusAboveStem = 0;
+    let e26RingOuterVerts = 0;
     for (let i = 0; i < omoiBase.positions.length; i += 3) {
       const y = omoiBase.positions[i + 1];
       const r = Math.hypot(omoiBase.positions[i], omoiBase.positions[i + 2]);
-      if (y >= 55.0 && y <= 68.5 && Math.abs(r - DOME_STEM_OUTER_RADIUS_MM) < 0.3) {
-        slenderStemVerts++;
+      if (y >= 53.0 && y <= 68.5) {
+        if (Math.abs(r - DOME_STEM_OUTER_RADIUS_MM) < 0.25) stemOuterVerts++;
+        if (Math.abs(r - DOME_STEM_INNER_RADIUS_MM) < 0.25) stemInnerVerts++;
+      }
+      if (y >= 68.5) {
+        if (r > topMaxRadiusAboveStem) topMaxRadiusAboveStem = r;
+        if (y >= 82.4 && Math.abs(r - SLENDER_E26_SOCKET_OUTER_RADIUS_MM) < 0.25) {
+          e26RingOuterVerts++;
+        }
       }
     }
-    expect(slenderStemVerts, 'OMOI 01 Ø30 mm elevated dome stem vertices').toBeGreaterThan(60);
+    expect(stemOuterVerts, 'OMOI 01 Ø17 mm slender stem outer vertices').toBeGreaterThan(60);
+    expect(stemInnerVerts, 'OMOI 01 Ø9 mm cable bore inner vertices').toBeGreaterThan(60);
+    expect(e26RingOuterVerts, 'OMOI 01 Ø46 mm compact E26 ring vertices').toBeGreaterThan(60);
+    expect(topMaxRadiusAboveStem, 'NO wide bayonet collar above stem (max r === 23.0 mm)').toBeCloseTo(
+      SLENDER_E26_SOCKET_OUTER_RADIUS_MM,
+      1
+    );
+
+    // Confirm OMOI 01 Shade flat Z=0 spider closes to exact Ø 40.8 mm (r = 20.4 mm) central ring!
+    let shadeE26BoreVerts = 0;
+    for (let i = 0; i < omoiShade.positions.length; i += 3) {
+      const y = omoiShade.positions[i + 1];
+      const r = Math.hypot(omoiShade.positions[i], omoiShade.positions[i + 2]);
+      if (y >= 85.9 && y <= 89.6 && Math.abs(r - SLENDER_E26_SHADE_BORE_RADIUS_MM) < 0.15) {
+        shadeE26BoreVerts++;
+      }
+    }
+    expect(shadeE26BoreVerts, 'OMOI 01 shade spider Ø40.8 mm central ring bore').toBeGreaterThan(60);
 
     // Switching mount to LED Kit 001 MUST auto-disable dome stem to 0 mm and stay 100% watertight
     const omoiLed = cloneConfig(omoi01);

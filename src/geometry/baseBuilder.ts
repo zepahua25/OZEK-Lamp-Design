@@ -7,6 +7,8 @@ import {
   COMPACT_FLUSH_RIM_HEIGHT_MM,
   DOME_STEM_INNER_RADIUS_MM,
   DOME_STEM_OUTER_RADIUS_MM,
+  SLENDER_E26_RING_HEIGHT_MM,
+  SLENDER_E26_SOCKET_OUTER_RADIUS_MM,
   THREAD_DEPTH_MM,
   couplingUsesBayonet,
   evaluateMaleCouplingOffset,
@@ -109,8 +111,8 @@ export function evaluateHankoSealDepthMm(uMm: number, vMm: number, spec: AuthorS
   const usableW = Math.max(3.2, (hwIn - innerStroke * 0.5) * 2);
   const usableH = Math.max(3.2, (hhIn - innerStroke * 0.5) * 2);
   const monoHalfW = usableW * 0.36;
-  const barThick = clamp(usableH * 0.165, 0.8, 1.45);
-  // Fit 4 horizontal bars cleanly inside usableH with clear gaps
+  const barThick = clamp(usableH * 0.142, 0.8, 1.35);
+  // Fit 4 horizontal bars cleanly inside usableH with clear gaps even at 11–12.5 mm height
   const spanY = Math.min(usableH * 0.82 - barThick, Math.max(barThick * 3.8, usableH * 0.68));
   const monoHalfH = spanY * 0.5;
 
@@ -932,19 +934,22 @@ export function buildIndependentBase(
     return mb;
   }
 
-  // --- STYLE 1: DOME (with optional E26/E27 elevated slender stem "palito" + 45° flare!) ---
+  // --- STYLE 1: DOME (with optional Slender E26/E27 Stem "palito" Ø 17 mm + 45° flare to Ø 46 / Ø 40.5 mm socket ring!) ---
   if (base.style === 'dome') {
     const domeH = Math.max(36, base.height);
     const stemH = getEffectiveDomeStemHeightMm(config);
     const flareH = getDomeStemFlareHeightMm(config);
     const hasStem = stemH > 0.1 && !isLed;
-    const couplingStartY = hasStem ? domeH + stemH + flareH : domeH;
-    const fullTopY = couplingStartY + couplingH;
+    const stemTopY = domeH + stemH;
+    const ringBotY = stemTopY + flareH;
+    const fullTopY = hasStem ? ringBotY + SLENDER_E26_RING_HEIGHT_MM : domeH + couplingH;
     const maxClipY = clipHeightMm ? Math.min(fullTopY, clipHeightMm) : fullTopY;
 
     const rFoot = Math.max(rNeck + 10, base.footRadius);
-    const rShoulder = rNeck + (base.coupling === 'gravity_seat' ? 4.5 : hasStem ? 2.5 : 4.0);
-    const rDomeCrown = hasStem ? DOME_STEM_OUTER_RADIUS_MM + 1.5 : rShoulder;
+    const rShoulder = hasStem
+      ? SLENDER_E26_SOCKET_OUTER_RADIUS_MM
+      : rNeck + (base.coupling === 'gravity_seat' ? 4.5 : 4.0);
+    const rDomeCrown = hasStem ? DOME_STEM_OUTER_RADIUS_MM + 1.0 : rShoulder;
 
     const domeRAt = (y: number): number => {
       const t = clamp(y / domeH, 0, 1);
@@ -1002,21 +1007,26 @@ export function buildIndependentBase(
     );
 
     if (hasStem) {
-      const stemTopY = domeH + stemH;
-      // Smooth neck transition into Ø 30 mm slender vertical stem, then 45° self-supporting flare up to E26 collar!
-      outer.push({ y: domeH + 1.5, r: DOME_STEM_OUTER_RADIUS_MM });
+      // Smooth dome crown transition into slender Ø 17.0 mm tube (16 mm tall), then 45° self-supporting flare
+      // strictly up to the compact Ø 46.0 mm E26/E27 socket ring (NO wide bayonet collar on top!).
+      outer.push({ y: domeH + 1.2, r: DOME_STEM_OUTER_RADIUS_MM });
       outer.push({ y: stemTopY, r: DOME_STEM_OUTER_RADIUS_MM });
       const flareSegs = 4;
       for (let i = 1; i <= flareSegs; i++) {
         const frac = i / flareSegs;
         outer.push({
           y: stemTopY + flareH * frac,
-          r: DOME_STEM_OUTER_RADIUS_MM + (rShoulder - DOME_STEM_OUTER_RADIUS_MM) * frac,
+          r:
+            DOME_STEM_OUTER_RADIUS_MM +
+            (SLENDER_E26_SOCKET_OUTER_RADIUS_MM - DOME_STEM_OUTER_RADIUS_MM) * frac,
         });
       }
+      if (maxClipY > ringBotY + 0.2) {
+        outer.push({ y: maxClipY, r: SLENDER_E26_SOCKET_OUTER_RADIUS_MM });
+      }
+    } else {
+      appendMaleCouplingNodes(outer, domeH, maxClipY);
     }
-
-    appendMaleCouplingNodes(outer, couplingStartY, maxClipY);
 
     const inner: ProfileNode[] = [];
     if (isLed) {
@@ -1032,19 +1042,18 @@ export function buildIndependentBase(
         0
       );
     } else if (hasStem) {
-      // Elevated E26/E27 support shelf at couplingStartY -> upward-facing funnel into Ø18 mm hollow stem -> 45° dome vault!
-      const ceilingBotY = couplingStartY - e26CeilingThick;
-      const stemTopY = domeH + stemH;
+      // Compact Ø 46.0 / Ø 40.5 mm E26/E27 socket ring -> 45° upward-facing cable funnel -> Ø 9.0 mm hollow stem -> 45° dome vault!
       const rStemIn = DOME_STEM_INNER_RADIUS_MM;
-      inner.push({ y: maxClipY, r: Math.max(e26.holeRadiusMm + 1.5, rNeck - 3.2) });
-      inner.push({ y: couplingStartY, r: e26.holeRadiusMm });
-      inner.push({ y: ceilingBotY, r: e26.holeRadiusMm });
-      // Smooth internal cable funnel from E26 hole inward to Ø 18 mm hollow stem bore (0% overhang!)
-      if (ceilingBotY > stemTopY + 0.8) {
-        inner.push({ y: stemTopY, r: rStemIn });
+      const rFunnelTop = Math.min(e26.holeRadiusMm - 1.5, SLENDER_E26_SOCKET_OUTER_RADIUS_MM - 6.0); // 17.0 mm (4.0 mm wall!)
+      const yFunnelTop = Math.max(stemTopY + 1.0, ringBotY - 2.0);
+      inner.push({ y: maxClipY, r: e26.holeRadiusMm });
+      if (maxClipY > ringBotY + 0.2) {
+        inner.push({ y: ringBotY, r: e26.holeRadiusMm });
       }
+      inner.push({ y: yFunnelTop, r: rFunnelTop });
+      inner.push({ y: stemTopY, r: rStemIn });
       inner.push({ y: domeH, r: rStemIn });
-      // 45° self-supporting dome vault expanding from rStemIn out to rBotCav inside the dome body!
+      // 45° self-supporting dome vault expanding from rStemIn (4.5 mm) out to rBotCav inside the dome body!
       const rBotCav = Math.max(e26.holeRadiusMm + 6.0, rFoot - 4.8);
       const vaultSegs = 6;
       const totalVaultDrop = Math.min(domeH - gableClearY, Math.max(6, rBotCav - rStemIn));
@@ -1086,16 +1095,16 @@ export function buildIndependentBase(
       inner.push({ y: 0, r: rLowest });
     }
 
-    const domeAvailH = domeH - gableClearY - 2.4;
-    const domeSealH = clamp(domeAvailH, 9.5, 16.0);
-    const domeSealW = Math.min(14.0, domeSealH * 0.88);
-    const domeSealY = clamp(
-      gableClearY + domeAvailH * 0.5 + 1.2,
-      gableClearY + domeSealH * 0.5 + 0.8,
-      domeH - domeSealH * 0.5 - 1.2
+    // Place rear Hanko Z☰ sign right above the cable arch (gableClearY + 1.5 mm margin)
+    const domeAvailH = domeH - gableClearY - 3.0;
+    const domeSealH = clamp(domeAvailH, 9.5, 12.5);
+    const domeSealW = Math.min(11.2, domeSealH * 0.88);
+    const domeSealY = Math.min(
+      domeH - domeSealH * 0.5 - 1.5,
+      gableClearY + 1.5 + domeSealH * 0.5
     );
     const domeSeal: AuthorSealSpec | null =
-      wantAuthorSeal && domeAvailH >= 10.0
+      wantAuthorSeal && domeAvailH >= 9.5
         ? {
             centerTheta: 0,
             yCenter: domeSealY,
@@ -1336,15 +1345,19 @@ export function buildIndependentBase(
       inner.push({ y: 0, r: rEnd });
     }
 
-    const pedAvailH = pedH - gableClearY - 2.0;
-    const pedSealH = clamp(pedAvailH, 9.5, 16.0);
-    const pedSealY = gableClearY + 1.0 + pedAvailH * 0.5;
+    // Place rear Hanko Z☰ sign right above the cable arch (gableClearY + 1.5 mm margin)
+    const pedAvailH = pedH - gableClearY - 3.0;
+    const pedSealH = clamp(pedAvailH, 9.5, 12.5);
+    const pedSealY = Math.min(
+      pedH - pedSealH * 0.5 - 1.5,
+      gableClearY + 1.5 + pedSealH * 0.5
+    );
     const pedSeal: AuthorSealSpec | null =
-      wantAuthorSeal && pedAvailH >= 10.0
+      wantAuthorSeal && pedAvailH >= 9.5
         ? {
             centerTheta: 0,
             yCenter: pedSealY,
-            widthMm: Math.min(14.0, pedSealH * 0.88),
+            widthMm: Math.min(11.2, pedSealH * 0.88),
             heightMm: pedSealH,
             depthMm: OZEK_HANKO_SEAL_DEPTH_MM,
             refRadiusMm: coneRAt(pedSealY),
@@ -1456,15 +1469,19 @@ export function buildIndependentBase(
       inner.push({ y: 0, r: rSafeCav });
     }
 
-    const cylAvailH = drumH - 1.4 - gableClearY - 1.4;
-    const cylSealH = clamp(cylAvailH, 9.5, 16.0);
-    const cylSealY = gableClearY + 0.7 + cylAvailH * 0.5;
+    // Place rear Hanko Z☰ sign right above the cable arch (gableClearY + 1.5 mm margin)
+    const cylAvailH = drumH - 1.4 - gableClearY - 2.5;
+    const cylSealH = clamp(cylAvailH, 9.5, 12.5);
+    const cylSealY = Math.min(
+      drumH - 1.4 - cylSealH * 0.5 - 1.0,
+      gableClearY + 1.5 + cylSealH * 0.5
+    );
     const cylSeal: AuthorSealSpec | null =
-      wantAuthorSeal && cylAvailH >= 10.0
+      wantAuthorSeal && cylAvailH >= 9.5
         ? {
             centerTheta: 0,
             yCenter: cylSealY,
-            widthMm: Math.min(14.0, cylSealH * 0.88),
+            widthMm: Math.min(11.2, cylSealH * 0.88),
             heightMm: cylSealH,
             depthMm: OZEK_HANKO_SEAL_DEPTH_MM,
             refRadiusMm: rDrum,

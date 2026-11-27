@@ -35,15 +35,14 @@ export const origamiFamily: LampFamilyDefinition = {
   getResolution(config: LampConfig, draft: boolean) {
     const hf = Math.max(6, Math.min(24, Math.round(config.origami.horizFacets)));
     const vt = Math.max(3, Math.min(12, Math.round(config.origami.vertTiers)));
-    // Exact EVEN integer multiples of hf and vt so vertices align directly on every diamond crease!
-    const uMult = draft
-      ? Math.max(6, Math.min(12, Math.floor(144 / hf) & ~1))
-      : Math.max(10, Math.min(20, Math.floor(288 / hf) & ~1));
+    // Exact crease-aligned Yoshimura lattice: uMult = 2 * vMult (even) ensures every diagonal diamond crease
+    // (uPhase ± 0.5*vPhase = k + 0.5) runs collinearly along exact mesh edges (zero jagged flatShading artifacts!).
     const vMult = draft
-      ? Math.max(8, Math.min(14, Math.floor(96 / vt) & ~1))
-      : Math.max(12, Math.min(22, Math.floor(192 / vt) & ~1));
-    const radialSegs = Math.min(384, Math.max(72, hf * Math.max(4, uMult)));
-    const heightSegs = Math.min(240, Math.max(48, vt * Math.max(4, vMult)));
+      ? Math.max(6, Math.min(12, Math.floor(144 / (2 * hf)) & ~1))
+      : Math.max(10, Math.min(16, Math.floor(280 / (2 * hf)) & ~1));
+    const uMult = Math.max(8, vMult * 2);
+    const radialSegs = Math.min(384, Math.max(80, hf * uMult));
+    const heightSegs = Math.min(240, Math.max(32, vt * vMult));
     return { radialSegs, heightSegs };
   },
 

@@ -1833,9 +1833,9 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                 {config.base.style === 'dome' && (
                   config.mount.type === 'e26_e27' ? (
                     <StudioSlider
-                      label="Cuello elevado en cúpula (E26/E27)"
+                      label="Cuello esbelto Ø17 mm (E26/E27)"
                       value={config.base.domeStemHeightMm ?? 0}
-                      defaultValue={14}
+                      defaultValue={16}
                       min={0}
                       max={22}
                       step={1}
@@ -1843,12 +1843,22 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                       minLabel="Sin cuello"
                       maxLabel="22 mm"
                       dark={isNight}
-                      onChange={(domeStemHeightMm) => updateBase({ domeStemHeightMm }, true)}
+                      onChange={(domeStemHeightMm) =>
+                        updateBase(
+                          {
+                            domeStemHeightMm,
+                            ...(domeStemHeightMm > 0
+                              ? { coupling: 'slender_e26', spiderBayonet: false }
+                              : {}),
+                          },
+                          true
+                        )
+                      }
                       onCommit={onCommitGeometry}
                     />
                   ) : (
                     <div className={`text-[10.5px] px-2.5 py-1.5 rounded-lg border ${divider} ${mutedText}`}>
-                      Cuello elevado desactivado automáticamente con Bambu LED Kit 001 (Ø 59.7 mm).
+                      Cuello esbelto Ø17 mm desactivado automáticamente con Bambu LED Kit 001 (Ø 59.7 mm).
                     </div>
                   )
                 )}
@@ -1927,16 +1937,37 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                         value: 'spider',
                         label: config.silhouette.skirtWaveAmp > 0.15 ? 'Araña 45°' : 'Araña Z=0',
                       },
+                      { value: 'slender_e26', label: 'Cuello E26' },
                     ]}
-                    onChange={(coupling) =>
+                    onChange={(coupling) => {
+                      if (coupling === 'slender_e26') {
+                        onChangeGeometry(
+                          (prev) => ({
+                            ...prev,
+                            mount: { ...prev.mount, type: 'e26_e27' },
+                            base: {
+                              ...prev.base,
+                              coupling: 'slender_e26',
+                              spiderBayonet: false,
+                              domeStemHeightMm:
+                                prev.base.style === 'dome'
+                                  ? Math.max(12, prev.base.domeStemHeightMm ?? 16)
+                                  : prev.base.domeStemHeightMm,
+                            },
+                          }),
+                          false
+                        );
+                        return;
+                      }
                       updateBase(
                         {
                           coupling,
                           couplingClearance: coupling === 'gravity_seat' ? 0.4 : 0.35,
+                          ...(config.base.style === 'dome' ? { domeStemHeightMm: 0 } : {}),
                         },
                         false
-                      )
-                    }
+                      );
+                    }}
                   />
                   <SegmentedControl
                     value={config.base.coupling}
@@ -1946,9 +1977,32 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                       { value: 'bayonet', label: 'Bayoneta ¼' },
                       { value: 'friction', label: 'Presión' },
                     ]}
-                    onChange={(coupling) => updateBase({ coupling }, false)}
+                    onChange={(coupling) =>
+                      updateBase(
+                        {
+                          coupling,
+                          ...(config.base.style === 'dome' ? { domeStemHeightMm: 0 } : {}),
+                        },
+                        false
+                      )
+                    }
                   />
-                  {config.base.coupling === 'spider' && (
+                  {config.base.coupling === 'slender_e26' && (
+                    <div
+                      className={`px-3 py-2 rounded-xl border text-[11px] leading-snug ${
+                        isNight
+                          ? 'bg-emerald-500/10 border-emerald-400/35 text-emerald-100'
+                          : 'bg-emerald-50/80 border-emerald-300/80 text-emerald-950'
+                      }`}
+                    >
+                      <div className="font-semibold">Cuello Esbelto E26/E27 (Sin bayoneta)</div>
+                      <div className="opacity-80 mt-0.5">
+                        Tubo Ø 17 mm (conducto Ø 9 mm) → ensanche 45° a anillo E26 Ø 46 / Ø 40.5 mm.
+                        Araña en Z=0 con aro Ø 40.8 mm fijado directo con la tuerca del socket.
+                      </div>
+                    </div>
+                  )}
+                  {(config.base.coupling === 'spider' || config.base.coupling === 'slender_e26') && (
                     <div className="space-y-2 pt-1">
                       {config.silhouette.skirtWaveAmp <= 0.15 && (
                         <>

@@ -174,7 +174,13 @@ export function generateBambuStudioGuide(
     );
   }
 
-  if (isSpider && !hasWavySkirt) {
+  if (config.base.coupling === 'slender_e26' && config.mount.type === 'e26_e27') {
+    lines.push(
+      '  • Pantalla (Cuello Esbelto E26/E27 · Araña en Z=0): Imprimir parada derecha en Z = 0,',
+      '    100% sin soportes. El anillo central (Ø 40.8 mm) se sujeta directo con la tuerca',
+      '    roscada del socket E26/E27 sobre el cuello Ø 17 mm (ocultando el socket bajo la pantalla).'
+    );
+  } else if (isSpider && !hasWavySkirt) {
     lines.push(
       '  • Pantalla (Araña interna en Z=0): Imprimir parada derecha en Z = 0, 100% sin soportes',
       '    (el anillo central con su bayoneta y los 4 radios planos descansan al ras de la cama).'
