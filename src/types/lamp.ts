@@ -136,6 +136,10 @@ export interface BaseParams {
   spiderArmCount: number;
   /** Signature OZ☰K (☰) seal: 3 minimalist horizontal 0.8 mm grooves spaced 2.5 mm around base body */
   signatureGrooves: boolean;
+  /** Rear Hanko author seal ("Z☰" double-frame monogram) debossed 0.6 mm on the back of the base */
+  authorSeal?: boolean;
+  /** Optional elevated hollow stem height on Dome base (0 - 22 mm; auto-disabled for LED Kit 001 Ø59.7 mm) */
+  domeStemHeightMm?: number;
   shadeVentilation: boolean;
   collarRevealMm: number; // 0 - 14 mm
 }
@@ -174,6 +178,8 @@ export interface HelicalParams {
   profile: 'faceted' | 'sine' | 'sawtooth';
   doubleProfile: boolean;
   doubleMix: number; // 0.2 - 1.0
+  /** Optional 3-ring horizontal Obi belt ("☰") cinched at the waist (v ≈ 0.46-0.54, +1.8 mm relief, <=45°) */
+  obiBelt?: boolean;
   bottomVentilation: boolean;
 }
 
@@ -196,6 +202,8 @@ export interface OrigamiParams {
   twistDeg: number;
   /** Crease edge smoothing for clean FDM printing without ringing (0 - 1) */
   edgeSoftness: number;
+  /** Optional thin translucent wall thickness (e.g. 1.0 mm Vase Mode for ZOUKEI 02) */
+  wallThickness?: number;
 }
 
 export type WovenPattern = 'basket_1x1' | 'knitted' | 'ripple_mesh' | 'grid_mesh';

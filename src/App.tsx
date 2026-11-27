@@ -224,14 +224,22 @@ export const App: React.FC = () => {
   );
 
   const handleSelectOzekPiece = useCallback(
-    (piece: OzekSignaturePiece) => {
+    (piece: OzekSignaturePiece, overrideOrganicMode?: 'gravity' | 'wind') => {
       setActiveOzekPieceId(piece.id);
       const next = cloneConfig(piece.config);
+      if (overrideOrganicMode === 'wind') {
+        next.organic.mode = 'wind';
+        next.organic.finDepth = 9;
+        next.organic.depth = 9;
+        next.organic.finThickness = 1.2;
+      }
       next.visual.sceneTheme = latestConfigRef.current.visual.sceneTheme;
       setConfig(next);
       latestConfigRef.current = next;
       dispatchGeometryBuild(next, false);
-      showToast(`Colección OZ☰K: ${piece.code} · ${piece.title}`);
+      showToast(
+        `Colección 01: ${piece.code} · ${piece.kanji} (${piece.title})${overrideOrganicMode === 'wind' ? ' · Viento' : ''}`
+      );
     },
     [dispatchGeometryBuild, showToast]
   );

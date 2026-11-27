@@ -53,10 +53,10 @@ export const wovenFamily: LampFamilyDefinition = {
     const isCellMode =
       config.woven.pattern === 'ripple_mesh' || config.woven.pattern === 'grid_mesh';
     const hf = isCellMode
-      ? Math.round(clamp(config.woven.horizFreq, 24, 44))
+      ? Math.round(clamp(config.woven.horizFreq, 16, 44))
       : Math.round(clamp(config.woven.horizFreq, 16, 72));
     const vf = isCellMode
-      ? Math.round(clamp(config.woven.vertFreq, 18, 32))
+      ? Math.round(clamp(config.woven.vertFreq, 12, 32))
       : Math.round(clamp(config.woven.vertFreq, 24, 90));
 
     // High final resolution (>= 280 radial × >= 200 vertical) so Knitted V-stitches,
@@ -78,12 +78,12 @@ export const wovenFamily: LampFamilyDefinition = {
     const isGrid = pattern === 'grid_mesh';
     const isCellMode = isRipple || isGrid;
 
-    // Dedicated sculpted cell ranges for RippleMesh & Grid: 24–44 radial × 18–32 rows, 3.5–6.5 mm depth
+    // Dedicated sculpted cell ranges for RippleMesh & Grid: 16–44 radial × 12–32 rows, 3.5–6.5 mm depth
     const hf = isCellMode
-      ? Math.max(24, Math.min(44, Math.round(horizFreq)))
+      ? Math.max(16, Math.min(44, Math.round(horizFreq)))
       : Math.max(16, Math.min(72, Math.round(horizFreq)));
     const vf = isCellMode
-      ? Math.max(18, Math.min(32, Math.round(vertFreq)))
+      ? Math.max(12, Math.min(32, Math.round(vertFreq)))
       : Math.max(24, Math.min(90, Math.round(vertFreq)));
 
     const minValleyWallMm = isCellMode ? 0.65 : 0.8;

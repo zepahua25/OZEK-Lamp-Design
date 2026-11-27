@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import '../families';
-import { CURATED_PRESETS, applySizePreset, cloneConfig } from '../../data/presets';
+import { CURATED_PRESETS, DEFAULT_CONFIG, applySizePreset, cloneConfig } from '../../data/presets';
 import { OZEK_SIGNATURE_COLLECTION } from '../../data/ozekCollection';
 import { generateLampGeometry } from '../solidBuilder';
+import { evaluateHankoSealDepthMm } from '../baseBuilder';
 import {
   buildLampZipPackage,
   exportPartToBinarySTL,
@@ -24,11 +25,14 @@ import {
   COMPACT_FLUSH_OUTER_RADIUS_MM,
   COMPACT_FLUSH_TWIST_Y_HIGH,
   COMPACT_FLUSH_TWIST_Y_LOW,
+  DOME_STEM_OUTER_RADIUS_MM,
   evaluateFemaleCouplingRadius,
   evaluateMaleCouplingOffset,
+  getEffectiveDomeStemHeightMm,
   getShadeSeatY,
 } from '../coupling';
 import { organicFamily } from '../families/organic';
+import { helicalFamily } from '../families/helical';
 import { wovenFamily } from '../families/woven';
 import {
   SHADE_SIZE_PRESETS,
@@ -126,6 +130,50 @@ function validateBinarySTLManifold(stlBuffer: ArrayBuffer): {
     isWatertight: degenerateTriangles === 0 && openEdges === 0 && nonManifoldEdges === 0,
     minZ,
   };
+}
+
+/**
+ * Standalone closed-sphere Organic configuration (on Compact Flush 15 mm + LED Kit 001)
+ * used to test Organic modes independently of Official Collection 01 presets.
+ */
+function makeOrganicFlushSphereConfig() {
+  const cfg = cloneConfig(DEFAULT_CONFIG);
+  cfg.family = 'organic';
+  cfg.silhouette.type = 'custom_spline';
+  cfg.silhouette.height = 170;
+  cfg.silhouette.shadeScale = 1.0;
+  cfg.silhouette.controlPoints = SILHOUETTE_SPLINE_TEMPLATES.sphere.points.map((p) => ({ ...p }));
+  cfg.silhouette.baseRadius = 56;
+  cfg.silhouette.midRadius = 94;
+  cfg.silhouette.topRadius = 8;
+  cfg.silhouette.crossSectionType = 'circle';
+  cfg.silhouette.skirtWaveAmp = 0;
+  cfg.silhouette.closeTopDome = true;
+  cfg.silhouette.includeDiffuser = false;
+  cfg.silhouette.buildMode = 'two_part';
+
+  cfg.organic.mode = 'gravity';
+  cfg.organic.voronoiCells = 16;
+  cfg.organic.voronoiSoftness = 0.78;
+  cfg.organic.voronoiDispersion = 0.5;
+  cfg.organic.gravityAccel = -9.8;
+  cfg.organic.finDepth = 20;
+  cfg.organic.finThickness = 1.4;
+
+  cfg.base.style = 'compact_flush';
+  cfg.base.finish = 'smooth';
+  cfg.base.height = 15;
+  cfg.base.footRadius = 37.5;
+  cfg.base.coupling = 'bayonet';
+  cfg.base.bayonetLugs = 3;
+  cfg.base.couplingClearance = 0.35;
+  cfg.base.signatureGrooves = false;
+  cfg.base.authorSeal = true;
+  cfg.base.collarRevealMm = 0;
+
+  cfg.mount.type = 'led_kit_001';
+  cfg.mount.position = 'bottom';
+  return cfg;
 }
 
 describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine', () => {
@@ -716,8 +764,8 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
   }, 30000);
 
   it('FIX-F — closes full Sphere/Dome cleanly to R = 0 mm (LED Kit 001 + Flamas pole closure, 0 degenerate pole tris) and Ø16 mm vent (E26/E27)', () => {
-    // 1. LED Kit 001 -> exact R = 0 mm closed North Pole without degenerate faces or open edges (ZEN 02 2-Piece Flush Sphere!)
-    const zen = cloneConfig(OZEK_SIGNATURE_COLLECTION.find((p) => p.id === 'zen-02')!.config);
+    // 1. LED Kit 001 -> exact R = 0 mm closed North Pole without degenerate faces or open edges (2-Piece Flush Organic Sphere!)
+    const zen = makeOrganicFlushSphereConfig();
     expect(zen.silhouette.closeTopDome).toBe(true);
     expect(zen.silhouette.buildMode).toBe('two_part');
     expect(zen.base.style).toBe('compact_flush');
@@ -847,6 +895,7 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
       cfg.base.finish = 'smooth';
       cfg.base.height = 56;
       cfg.base.signatureGrooves = true;
+      cfg.base.authorSeal = false;
       const { parts, metrics } = generateLampGeometry(cfg, {
         draft: true,
         validateManifold: true,
@@ -875,7 +924,7 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
   it('FIX-H — validates 3D Icosphere Isocontour Gravity ribbons (10/16/22 centers, 5–9 levels, 16–24 mm deep, Z >= 0) + Sculpt & AMS guide', () => {
     for (const centers of [10, 16, 22]) {
       for (const grav of [-9.8, 0, 9.8]) {
-        const cfg = cloneConfig(OZEK_SIGNATURE_COLLECTION[1].config); // ZEN 02 Flush 2-Piece Sphere
+        const cfg = makeOrganicFlushSphereConfig(); // Flush 2-Piece Organic Sphere
         cfg.organic.mode = 'gravity';
         cfg.organic.voronoiCells = centers;
         cfg.organic.voronoiSoftness = centers === 10 ? 0.45 : 0.82;
@@ -949,7 +998,7 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
     }
 
     // Verify Z-up STL export minZ === 0 + Sculpt brush strokes + 2-Piece closed LED Kit 001 + AMS guide
-    const cfg = cloneConfig(OZEK_SIGNATURE_COLLECTION[1].config);
+    const cfg = makeOrganicFlushSphereConfig();
     cfg.silhouette.buildMode = 'two_part';
     cfg.organic.mode = 'gravity';
     cfg.organic.voronoiCells = 16;
@@ -994,7 +1043,7 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
 
   it('FIX-I — validates Organic Growth ("Crecimiento") dense carnation ruffled fins (24–48 fins, 18–28 mm deep, vEnd = 0.999 closed pole R = 0)', () => {
     for (const finCount of [24, 32, 48]) {
-      const cfg = cloneConfig(OZEK_SIGNATURE_COLLECTION[1].config); // Flush Closed Sphere LED Kit 001
+      const cfg = makeOrganicFlushSphereConfig(); // Flush Closed Sphere LED Kit 001
       cfg.organic.mode = 'growth';
       cfg.organic.growthFinCount = finCount;
       cfg.organic.growthAmp = finCount === 24 ? 0.5 : 0.88;
@@ -1045,7 +1094,7 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
 
   it('FIX-J — validates Organic Wind ("Viento") 45–75 thin fins across Brisa / Ráfagas / Remolino (Z >= 0, closed sphere R = 0)', () => {
     for (const windType of ['breeze', 'gusts', 'vortex'] as const) {
-      const cfg = cloneConfig(OZEK_SIGNATURE_COLLECTION[1].config); // Flush Closed Sphere LED Kit 001
+      const cfg = makeOrganicFlushSphereConfig(); // Flush Closed Sphere LED Kit 001
       cfg.organic.mode = 'wind';
       cfg.organic.windType = windType;
       cfg.organic.windFinCount = windType === 'vortex' ? 68 : 54;
@@ -1094,7 +1143,7 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
   }, 45000);
 
   it('FIX-K — validates Compact Flush Base (Ø 75.0 × 15.0 mm) + Exact Embedded Female Bayonet Socket (Ø 74.2 mm, seatY = 0, Z = 0)', () => {
-    const zen = cloneConfig(OZEK_SIGNATURE_COLLECTION.find((p) => p.id === 'zen-02')!.config);
+    const zen = cloneConfig(OZEK_SIGNATURE_COLLECTION.find((p) => p.id === 'zoukei-02')!.config);
     expect(zen.base.style).toBe('compact_flush');
     expect(getShadeSeatY(zen)).toBe(0);
 
@@ -1196,7 +1245,7 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
     const sizes: LampSizePreset[] = ['XS', 'S', 'M', 'L', 'XL'];
 
     // 1. ZEN 02 Organic Sphere + Compact Flush Ø75 × 15 mm + LED Kit 001 Ø59.7 mm + Bayonet Ø74.2 mm
-    const zenOrig = cloneConfig(OZEK_SIGNATURE_COLLECTION.find((p) => p.id === 'zen-02')!.config);
+    const zenOrig = cloneConfig(OZEK_SIGNATURE_COLLECTION.find((p) => p.id === 'zoukei-02')!.config);
     expect(zenOrig.silhouette.height).toBe(SHADE_SIZE_PRESETS.M.heightMm);
 
     for (const size of sizes) {
@@ -1252,4 +1301,192 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
       expect(resHik.metrics.isWatertight, `Hikari scale ${scaleVal} watertight`).toBe(true);
     }
   }, 45000);
+
+  it('FIX-M — validates Official OZ☰K STUDIO Collection 01 (OMOI 01, ZOUKEI 02, EN 03 + Obi ☰, KŌBŌ 04), rear Hanko Z☰ deboss STL & DFM guide (<= 245 mm A1)', () => {
+    expect(OZEK_SIGNATURE_COLLECTION.map((p) => p.code)).toEqual([
+      'OMOI 01',
+      'ZOUKEI 02',
+      'EN 03',
+      'KŌBŌ 04',
+    ]);
+
+    for (const piece of OZEK_SIGNATURE_COLLECTION) {
+      expect(piece.config.base.authorSeal, `${piece.code} rear Hanko Z☰ enabled`).toBe(true);
+
+      const { parts, metrics } = generateLampGeometry(piece.config, {
+        draft: false,
+        validateManifold: true,
+      });
+
+      expect(metrics.openEdges, `${piece.code} openEdges`).toBe(0);
+      expect(metrics.nonManifoldEdges, `${piece.code} nonManifoldEdges`).toBe(0);
+      expect(metrics.isWatertight, `${piece.code} watertight`).toBe(true);
+      expect(metrics.volumeCm3, `${piece.code} volume > 0`).toBeGreaterThan(25);
+      // Strict Bambu Lab A1 safety margin (<= 245 mm in X, Y, and Z!)
+      expect(metrics.widthMm, `${piece.code} width <= 245 mm`).toBeLessThanOrEqual(245);
+      expect(metrics.depthMm, `${piece.code} depth <= 245 mm`).toBeLessThanOrEqual(245);
+      expect(metrics.heightMm, `${piece.code} height <= 245 mm`).toBeLessThanOrEqual(245);
+
+      // Verify Base STL passes slicer-grade position-welded manifold check (0 non-manifold, 0 degenerate!)
+      const basePart = parts.find((p) => p.role === 'base')!;
+      expect(basePart, `${piece.code} has base`).toBeDefined();
+      const baseStl = exportPartToBinarySTL(basePart);
+      const baseStlRep = validateBinarySTLManifold(baseStl);
+      expect(baseStlRep.degenerateTriangles, `${piece.code} base STL 0 degenerate`).toBe(0);
+      expect(baseStlRep.openEdges, `${piece.code} base STL 0 welded open`).toBe(0);
+      expect(baseStlRep.nonManifoldEdges, `${piece.code} base STL 0 welded non-manifold`).toBe(0);
+      expect(baseStlRep.isWatertight, `${piece.code} base STL watertight`).toBe(true);
+      expect(baseStlRep.minZ, `${piece.code} base STL minZ === 0`).toBeCloseTo(0, 3);
+
+      // Verify rear Hanko Z☰ deboss (0.6 mm inward recess) actually exists on the back wall (theta ≈ 0, x > 0)!
+      let rearDebossVerts = 0;
+      const isCompact = piece.config.base.style === 'compact_flush';
+      const refR = isCompact
+        ? COMPACT_FLUSH_COLLAR_RADIUS_MM
+        : piece.config.base.style === 'cylinder'
+          ? Math.max(piece.config.base.footRadius, 42.45)
+          : 0;
+      if (refR > 0) {
+        const yMinSeal = isCompact ? 6.0 : 10.0;
+        const yMaxSeal = isCompact ? 14.5 : piece.config.base.height - 2.0;
+        for (let i = 0; i < basePart.positions.length; i += 3) {
+          const x = basePart.positions[i];
+          const y = basePart.positions[i + 1];
+          const z = basePart.positions[i + 2];
+          if (x > 25 && Math.abs(z) < 7.5 && y >= yMinSeal && y <= yMaxSeal) {
+            const r = Math.hypot(x, z);
+            if (r < refR - 0.35 && r > refR - 0.72) {
+              rearDebossVerts++;
+            }
+          }
+        }
+        expect(rearDebossVerts, `${piece.code} rear Hanko Z☰ debossed vertices`).toBeGreaterThan(20);
+      }
+
+      // Verify official DFM guide content for each Collection 01 piece
+      const guide = generateBambuStudioGuide(
+        piece.config,
+        metrics,
+        parts.map((p) => `${piece.id}_${p.name}.stl`)
+      );
+      expect(guide).toContain('OZ☰K STUDIO — Colección 01 ("Damos alma a cada pieza.")');
+      expect(guide).toContain(piece.code);
+      expect(guide).toContain('ARACHNE');
+      expect(guide).toContain('Ensure vertical shell thickness');
+      expect(guide).toContain('Fuzzy skin point distance : 0.8 mm');
+      expect(guide).toContain('sello trasero Z☰');
+      expect(guide).toContain('LED');
+    }
+
+    // 1. Verify rear Hanko Z☰ is UNMIRRORED in 3D world space (diagonal runs top-right `/` bottom-left when viewed from outside +X):
+    //    Looking from (+R, y, 0) toward origin with +Y up, RIGHT is -Z (+theta) and LEFT is +Z (-theta)!
+    const sealSpec = {
+      centerTheta: 0,
+      yCenter: 26,
+      widthMm: 14,
+      heightMm: 16,
+      depthMm: 0.6,
+      refRadiusMm: 56,
+    };
+    // SDF check: between top bar (k=0, y=+3.66) and bar 1 (k=1, y=+1.22), gap midpoint is v = +2.44 mm;
+    // Z diagonal crosses at u = +1.8 mm (upper-right) and NOT u = -1.8 mm (upper-left)!
+    expect(evaluateHankoSealDepthMm(1.8, 2.44, sealSpec), 'Z☰ diagonal passes upper-right (+u,+v)').toBeGreaterThan(0.35);
+    expect(evaluateHankoSealDepthMm(-1.8, 2.44, sealSpec), 'Z☰ upper-left gap (-u,+v) is raised').toBeLessThan(0.05);
+    expect(evaluateHankoSealDepthMm(-1.8, -2.44, sealSpec), 'Z☰ diagonal passes lower-left (-u,-v)').toBeGreaterThan(0.35);
+    expect(evaluateHankoSealDepthMm(1.8, -2.44, sealSpec), 'Z☰ lower-right gap (+u,-v) is raised').toBeLessThan(0.05);
+
+    // 3D base mesh check on KŌBŌ 04 (smooth cylinder r = 56 mm, seal centered at theta=0, yCenter = (9 + 40)/2 = 24.5 mm):
+    const kobo04 = cloneConfig(OZEK_SIGNATURE_COLLECTION.find((p) => p.id === 'kobo-04')!.config);
+    expect(kobo04.woven.horizFreq).toBe(20);
+    expect(kobo04.woven.vertFreq).toBe(16);
+    expect(kobo04.woven.rippleDepth).toBeCloseTo(5.5, 2);
+    expect(kobo04.silhouette.includeDiffuser).toBe(true);
+    const koboRes = generateLampGeometry(kobo04, { draft: false, validateManifold: true });
+    expect(koboRes.parts, 'KŌBŌ 04 has Base + Diffuser + Shade').toHaveLength(3);
+    const koboBase = koboRes.parts.find((p) => p.role === 'base')!;
+    const yCenterKobo = (9.0 + (kobo04.base.height - 2.0)) * 0.5;
+    let upperRightDebossed = 0; // screen upper-right = z < 0, y > yCenter
+    let upperLeftDebossed = 0; // screen upper-left  = z > 0, y > yCenter (must be empty gap!)
+    for (let i = 0; i < koboBase.positions.length; i += 3) {
+      const x = koboBase.positions[i];
+      const y = koboBase.positions[i + 1];
+      const z = koboBase.positions[i + 2];
+      if (x <= 40) continue;
+      const dy = y - yCenterKobo;
+      const r = Math.hypot(x, z);
+      const isDebossed = r < 56 - 0.35;
+      if (dy > 2.2 && dy < 2.7) {
+        if (z < -1.3 && z > -2.3 && isDebossed) upperRightDebossed++;
+        if (z > 1.3 && z < 2.3 && isDebossed) upperLeftDebossed++;
+      }
+    }
+    expect(upperRightDebossed, 'KŌBŌ 04 rear Z☰ diagonal debossed at upper-right (z < 0)').toBeGreaterThan(0);
+    expect(upperLeftDebossed, 'KŌBŌ 04 rear Z☰ upper-left (z > 0) stays un-debossed (not mirrored!)').toBe(0);
+
+    // 2. Verify ZOUKEI 02 · 造形 is Origami Vase-Mode Chōchin (12×5, 1.0 mm Arena, open top/bottom, Compact Flush 15 mm Gris Ónice)
+    const zoukeiPiece = OZEK_SIGNATURE_COLLECTION.find((p) => p.id === 'zoukei-02')!;
+    expect(zoukeiPiece.config.family).toBe('origami');
+    expect(zoukeiPiece.config.origami.horizFacets).toBe(12);
+    expect(zoukeiPiece.config.origami.vertTiers).toBe(5);
+    expect(zoukeiPiece.config.origami.wallThickness).toBeCloseTo(1.0, 2);
+    expect(zoukeiPiece.config.silhouette.closeTopDome).toBe(false);
+    expect(zoukeiPiece.config.base.style).toBe('compact_flush');
+    expect(zoukeiPiece.config.visual.material).toBe('ozek_sand');
+    expect(zoukeiPiece.config.visual.baseMaterial).toBe('ozek_onyx');
+    expect(zoukeiPiece.badge).toContain('Modo Jarrón');
+
+    // 3. Verify EN 03 · 円 / ☰ real helical twist (105°, 56 ribs) + 3-ring Obi belt ("☰") geometry
+    const en03 = cloneConfig(OZEK_SIGNATURE_COLLECTION.find((p) => p.id === 'en-03')!.config);
+    expect(en03.helical.twistDeg).toBe(105);
+    expect(en03.helical.ribCount).toBe(56);
+    expect(en03.helical.obiBelt).toBe(true);
+    const evalEn03 = helicalFamily.createEvaluator(en03);
+    const H = en03.silhouette.height;
+    const sampleOffsetAtYWaist = (yWaistMm: number) =>
+      evalEn03({
+        u: 0,
+        theta: 0,
+        v: 0.5 + yWaistMm / H,
+        y: H * 0.5 + yWaistMm,
+        baseRadius: 41,
+        height: H,
+      }).outerOffset;
+
+    // 3 crests at -2.5, 0, +2.5 mm (~+1.8 mm relief) separated by 2 valleys at -1.25, +1.25 mm (~+0.95 mm)!
+    for (const c of [-2.5, 0, 2.5]) {
+      expect(sampleOffsetAtYWaist(c), `EN 03 Obi ring crest at ${c} mm`).toBeGreaterThan(1.7);
+    }
+    for (const val of [-1.25, 1.25]) {
+      expect(sampleOffsetAtYWaist(val), `EN 03 Obi ring valley at ${val} mm`).toBeLessThan(1.05);
+    }
+
+    // 4. Verify OMOI 01 · 思い elevated slender neck ("palito") on Dome Base for E26/E27 (and auto-disable on LED Kit 001!)
+    const omoi01 = cloneConfig(OZEK_SIGNATURE_COLLECTION.find((p) => p.id === 'omoi-01')!.config);
+    expect(omoi01.base.style).toBe('dome');
+    expect(omoi01.mount.type).toBe('e26_e27');
+    expect(omoi01.base.domeStemHeightMm).toBe(14);
+    expect(getEffectiveDomeStemHeightMm(omoi01)).toBe(14);
+    expect(getShadeSeatY(omoi01)).toBe(84); // 54 dome + 14 stem + 16 45°-flare = 84 mm
+
+    const omoiRes = generateLampGeometry(omoi01, { draft: true, validateManifold: true });
+    const omoiBase = omoiRes.parts.find((p) => p.role === 'base')!;
+    let slenderStemVerts = 0;
+    for (let i = 0; i < omoiBase.positions.length; i += 3) {
+      const y = omoiBase.positions[i + 1];
+      const r = Math.hypot(omoiBase.positions[i], omoiBase.positions[i + 2]);
+      if (y >= 55.0 && y <= 68.5 && Math.abs(r - DOME_STEM_OUTER_RADIUS_MM) < 0.3) {
+        slenderStemVerts++;
+      }
+    }
+    expect(slenderStemVerts, 'OMOI 01 Ø30 mm elevated dome stem vertices').toBeGreaterThan(60);
+
+    // Switching mount to LED Kit 001 MUST auto-disable dome stem to 0 mm and stay 100% watertight
+    const omoiLed = cloneConfig(omoi01);
+    omoiLed.mount.type = 'led_kit_001';
+    expect(getEffectiveDomeStemHeightMm(omoiLed)).toBe(0);
+    const omoiLedRes = generateLampGeometry(omoiLed, { draft: true, validateManifold: true });
+    expect(omoiLedRes.metrics.openEdges, 'OMOI 01 LED auto-disable stem openEdges').toBe(0);
+    expect(omoiLedRes.metrics.nonManifoldEdges, 'OMOI 01 LED auto-disable stem nonManifold').toBe(0);
+    expect(omoiLedRes.metrics.isWatertight, 'OMOI 01 LED auto-disable stem watertight').toBe(true);
+  }, 60000);
 });

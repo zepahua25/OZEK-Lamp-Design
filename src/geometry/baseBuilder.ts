@@ -5,10 +5,14 @@ import {
   COMPACT_FLUSH_HEIGHT_MM,
   COMPACT_FLUSH_OUTER_RADIUS_MM,
   COMPACT_FLUSH_RIM_HEIGHT_MM,
+  DOME_STEM_INNER_RADIUS_MM,
+  DOME_STEM_OUTER_RADIUS_MM,
   THREAD_DEPTH_MM,
   couplingUsesBayonet,
   evaluateMaleCouplingOffset,
   getCouplingHeightMm,
+  getDomeStemFlareHeightMm,
+  getEffectiveDomeStemHeightMm,
   getEffectiveNeckRadius,
   getShadeSeatY,
 } from './coupling';
@@ -31,6 +35,118 @@ export const BASE_CORD_SLOT_HEIGHT_MM = 5.0;
 /** Signature OZ☰K (☰) seal geometry: 3 horizontal 45° V-grooves, 0.8 mm deep, spaced 2.5 mm apart */
 export const OZEK_GROOVE_DEPTH_MM = 0.8;
 export const OZEK_GROOVE_SPACING_MM = 2.5;
+
+/** Rear Hanko author seal ("Z☰") deboss depth (mm) — crisp with 0.4 mm nozzle & 0% supports */
+export const OZEK_HANKO_SEAL_DEPTH_MM = 0.6;
+
+export interface AuthorSealSpec {
+  centerTheta: number;
+  yCenter: number;
+  widthMm: number;
+  heightMm: number;
+  depthMm: number;
+  refRadiusMm: number;
+}
+
+/** Exact 2D signed distance to a centered rounded rectangle (negative inside, positive outside). */
+function sdRoundedBox2D(px: number, py: number, halfW: number, halfH: number, radius: number): number {
+  const r = Math.min(radius, Math.min(halfW, halfH));
+  const qx = Math.abs(px) - (halfW - r);
+  const qy = Math.abs(py) - (halfH - r);
+  const outDist = Math.hypot(Math.max(qx, 0), Math.max(qy, 0));
+  const inDist = Math.min(Math.max(qx, qy), 0);
+  return outDist + inDist - r;
+}
+
+/** Exact 2D signed distance to a line segment (ax,ay)-(bx,by). */
+function sdSegment2D(
+  px: number,
+  py: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number
+): number {
+  const pax = px - ax;
+  const pay = py - ay;
+  const bax = bx - ax;
+  const bay = by - ay;
+  const denom = Math.max(1e-8, bax * bax + bay * bay);
+  const h = clamp((pax * bax + pay * bay) / denom, 0, 1);
+  return Math.hypot(pax - bax * h, pay - bay * h);
+}
+
+/**
+ * Evaluates the OZ☰K Hanko author seal ("Z☰") deboss depth in mm at local surface coordinates
+ * (uMm = left-to-right horizontal mm when viewing the base from outside, vMm = vertical mm from stamp center).
+ * Geometry matches the official OZ☰K hanko stamp:
+ *  - Double rounded-rectangle frame (outer + inner stroke >= 0.8 mm)
+ *  - Center monogram "Z☰": 4 crisp horizontal bars cut diagonally by the Z stroke (strokes >= 0.8 mm)
+ *  - 0.60 mm inward deboss with 45° printable bevel (0% supports!)
+ */
+export function evaluateHankoSealDepthMm(uMm: number, vMm: number, spec: AuthorSealSpec): number {
+  const hw = spec.widthMm * 0.5;
+  const hh = spec.heightMm * 0.5;
+  if (Math.abs(uMm) > hw + 0.6 || Math.abs(vMm) > hh + 0.6) return 0;
+
+  // Frame strokes guaranteed >= 0.80 mm for crisp 0.4 mm nozzle extrusion
+  const outerStroke = clamp(spec.widthMm * 0.068, 0.8, 1.05);
+  const innerStroke = Math.max(0.8, outerStroke * 0.92);
+  const frameGap = clamp(spec.widthMm * 0.056, 0.52, 0.92);
+
+  const hwOut = hw - outerStroke * 0.5;
+  const hhOut = hh - outerStroke * 0.5;
+  const rOut = Math.min(hw, hh) * 0.24;
+  const dOuterFrame = Math.abs(sdRoundedBox2D(uMm, vMm, hwOut, hhOut, rOut)) - outerStroke * 0.5;
+
+  const inset = outerStroke * 0.5 + frameGap + innerStroke * 0.5;
+  const hwIn = Math.max(1.8, hwOut - inset);
+  const hhIn = Math.max(1.8, hhOut - inset);
+  const rIn = Math.max(0.55, rOut - inset * 0.65);
+  const dInnerFrame = Math.abs(sdRoundedBox2D(uMm, vMm, hwIn, hhIn, rIn)) - innerStroke * 0.5;
+
+  // Inner usable area for the "Z☰" monogram (4 horizontal bars + Z diagonal)
+  const usableW = Math.max(3.2, (hwIn - innerStroke * 0.5) * 2);
+  const usableH = Math.max(3.2, (hhIn - innerStroke * 0.5) * 2);
+  const monoHalfW = usableW * 0.36;
+  const barThick = clamp(usableH * 0.165, 0.8, 1.45);
+  // Fit 4 horizontal bars cleanly inside usableH with clear gaps
+  const spanY = Math.min(usableH * 0.82 - barThick, Math.max(barThick * 3.8, usableH * 0.68));
+  const monoHalfH = spanY * 0.5;
+
+  let dMono = Infinity;
+  // 4 horizontal bars
+  for (let k = 0; k < 4; k++) {
+    const yc = monoHalfH - (spanY * k) / 3;
+    const dBar = sdRoundedBox2D(uMm, vMm - yc, monoHalfW, barThick * 0.5, 0.05);
+    if (dBar < dMono) dMono = dBar;
+  }
+
+  // Diagonal Z stroke from top-right to bottom-left, clipped cleanly to the top/bottom bar outer bounds
+  const dxTip = Math.max(0.5, monoHalfW - barThick * 0.32);
+  const dDiagRaw =
+    sdSegment2D(uMm, vMm, dxTip, monoHalfH, -dxTip, -monoHalfH) - barThick * 0.54;
+  const dDiagClip = Math.max(dDiagRaw, Math.abs(vMm) - (monoHalfH + barThick * 0.5));
+  if (dDiagClip < dMono) dMono = dDiagClip;
+
+  const dUnion = Math.min(dOuterFrame, dInnerFrame, dMono);
+  // ~45° printable bevel across 0.24 mm transition into 0.60 mm deboss depth
+  const bevel = 0.24;
+  const mask = 1 - smoothstep(-bevel, bevel, dUnion);
+  return spec.depthMm * mask;
+}
+
+/** Smooth 1 inside the Hanko seal cartouche (including a 1.3 mm clean frame margin), 0 outside. */
+function evaluateHankoCartoucheMask(uMm: number, vMm: number, spec: AuthorSealSpec): number {
+  const dBox = sdRoundedBox2D(
+    uMm,
+    vMm,
+    spec.widthMm * 0.5 + 1.1,
+    spec.heightMm * 0.5 + 1.1,
+    Math.min(spec.widthMm, spec.heightMm) * 0.18
+  );
+  return 1 - smoothstep(0.0, 1.4, dBox);
+}
 
 export class SolidMeshBuilder {
   private pos: number[] = [];
@@ -89,42 +205,220 @@ export interface ProfileNode {
 }
 
 /**
+ * Locally refines outer profile nodes strictly inside the vertical window of the Hanko "Z☰" seal
+ * and applies the 0.60 mm inward deboss (plus smooth rib flattening inside the seal cartouche).
+ * Preserves outer[0] & outer[1] untouched when a bottom cord slot is present so the 45° gable roof
+ * and STL manifold topology remain 100% invariant!
+ */
+function applyAuthorSealToOuterNodes(
+  outerNodes: ProfileNode[],
+  seal: AuthorSealSpec | null,
+  hasCordSlot: boolean,
+  draft: boolean
+): ProfileNode[] {
+  if (!seal) return outerNodes;
+
+  const yMargin = Math.min(0.9, seal.heightMm * 0.045);
+  const yBandLo = seal.yCenter - seal.heightMm * 0.5 - yMargin;
+  const yBandHi = seal.yCenter + seal.heightMm * 0.5 + yMargin;
+  const stepY = draft ? 0.52 : 0.28;
+  const minProtectedIdx = hasCordSlot ? 2 : 0;
+
+  // 1. Subdivide vertical segments overlapping [yBandLo, yBandHi] while preserving index 0 & 1 for cordSlot
+  const refined: ProfileNode[] = [];
+  for (let i = 0; i < outerNodes.length; i++) {
+    const cur = outerNodes[i];
+    refined.push(cur);
+    if (i === outerNodes.length - 1) break;
+    if (i < minProtectedIdx) continue;
+
+    const nxt = outerNodes[i + 1];
+    const dy = nxt.y - cur.y;
+    if (dy <= stepY * 1.15) continue;
+    if (nxt.y < yBandLo || cur.y > yBandHi) continue;
+
+    const segStart = Math.max(cur.y + 0.14, yBandLo);
+    const segEnd = Math.min(nxt.y - 0.14, yBandHi);
+    if (segEnd <= segStart + 0.12) continue;
+
+    // Insert boundary anchors if cur.y < segStart or nxt.y > segEnd so transition stays crisp
+    const ys: number[] = [];
+    if (segStart - cur.y > stepY * 1.2) {
+      ys.push(segStart);
+    }
+    const subSpan = segEnd - segStart;
+    const subSteps = Math.max(1, Math.round(subSpan / stepY));
+    for (let s = 1; s < subSteps; s++) {
+      ys.push(segStart + (subSpan * s) / subSteps);
+    }
+    if (nxt.y - segEnd > stepY * 1.2) {
+      ys.push(segEnd);
+    }
+
+    let lastY = cur.y;
+    for (const yMid of ys) {
+      if (yMid - lastY < 0.14 || nxt.y - yMid < 0.14) continue;
+      lastY = yMid;
+      const frac = clamp((yMid - cur.y) / dy, 0, 1);
+      const rMid = cur.r + (nxt.r - cur.r) * frac;
+      const fnA = cur.rFn;
+      const fnB = nxt.rFn;
+      const rFnMid =
+        fnA || fnB
+          ? (theta: number) => {
+              const ra = fnA ? fnA(theta) : cur.r;
+              const rb = fnB ? fnB(theta) : nxt.r;
+              return ra + (rb - ra) * frac;
+            }
+          : undefined;
+      refined.push({ y: yMid, r: rMid, rFn: rFnMid });
+    }
+  }
+
+  // 2. Wrap nodes inside [yBandLo, yBandHi] with the Hanko "Z☰" SDF deboss & smooth cartouche rib blend
+  const halfAngCull = (seal.widthMm * 0.5 + 3.0) / Math.max(18, seal.refRadiusMm);
+  return refined.map((node, idx) => {
+    if (idx < minProtectedIdx) return node;
+    if (node.y < yBandLo || node.y > yBandHi) return node;
+    const prevFn = node.rFn;
+    const baseR = node.r;
+    const vMm = node.y - seal.yCenter;
+
+    return {
+      y: node.y,
+      r: baseR,
+      rFn: (theta: number) => {
+        const rawR = prevFn ? prevFn(theta) : baseR;
+        const dAng = Math.atan2(
+          Math.sin(theta - seal.centerTheta),
+          Math.cos(theta - seal.centerTheta)
+        );
+        if (Math.abs(dAng) > halfAngCull) return rawR;
+
+        // Left-to-right horizontal arc mm when viewing the outside of the base (looking inward at +X with +Y up, +theta is right!)
+        const uMm = dAng * Math.max(18, baseR);
+        // Smoothly flatten vertical ribs inside the cartouche so the Hanko seal prints razor-sharp!
+        const cartouche = evaluateHankoCartoucheMask(uMm, vMm, seal);
+        const smoothWallR = rawR * (1 - cartouche) + baseR * cartouche;
+        const deboss = evaluateHankoSealDepthMm(uMm, vMm, seal);
+        return Math.max(12, smoothWallR - deboss);
+      },
+    };
+  });
+}
+
+/**
  * Generates a 100% watertight 2-manifold surface of revolution from a closed cross-section polygon
  * with an optional bottom cable exit slot (`widthMm x heightMm`) featuring a **45° peaked gable roof**
- * so the slot prints with ZERO sagging or supports on Bambu Lab A1!
+ * and optional local angular refinement for the rear OZ☰K Hanko "Z☰" author seal!
  */
 export function buildClosedRevolutionWithOptionalCordSlot(
   mb: SolidMeshBuilder,
-  N: number,
-  outerNodes: ProfileNode[],
+  requestedN: number,
+  outerNodesInput: ProfileNode[],
   innerNodes: ProfileNode[],
-  cordSlot: { widthMm: number; heightMm: number } | null
+  cordSlot: { widthMm: number; heightMm: number } | null,
+  authorSeal: AuthorSealSpec | null = null,
+  draft = false
 ): void {
-  const thetas = new Float64Array(N);
+  const outerNodes = applyAuthorSealToOuterNodes(
+    outerNodesInput,
+    authorSeal,
+    Boolean(cordSlot && cordSlot.widthMm > 0),
+    draft
+  );
+
+  // Build strictly increasing unique angular samples (with local high-res packing inside the Hanko seal window!)
+  const sealHalfAng = authorSeal
+    ? clamp((authorSeal.widthMm * 0.5 + 1.4) / Math.max(18, authorSeal.refRadiusMm), 0.08, 0.55)
+    : 0;
+  const sealTargetDTheta = authorSeal
+    ? (draft ? 0.5 : 0.27) / Math.max(18, authorSeal.refRadiusMm)
+    : 1;
+
   let slotSegs = 0;
+  const thetaList: number[] = [];
 
   if (cordSlot && cordSlot.widthMm > 0) {
     const rSlotRef = Math.max(15, innerNodes[innerNodes.length - 1].r);
     const halfAlpha = Math.asin(clamp((cordSlot.widthMm * 0.5) / rSlotRef, 0.03, 0.38));
+
     // Force EVEN slotSegs >= 4 so u = slotSegs / 2 is the exact crisp 45° gable apex!
-    slotSegs = Math.max(4, Math.round((2 * halfAlpha) / ((2 * Math.PI) / N)));
+    // When the Hanko seal is centered directly above the cord slot (centerTheta ≈ 0), pack extra fine steps inside the slot span!
+    const sealAboveSlot = Boolean(authorSeal && Math.abs(authorSeal.centerTheta) < 0.05);
+    let wantSlotSegs = Math.max(4, Math.round((2 * halfAlpha) / ((2 * Math.PI) / requestedN)));
+    if (sealAboveSlot) {
+      wantSlotSegs = Math.max(wantSlotSegs, Math.round((2 * halfAlpha) / sealTargetDTheta));
+    }
+    if ((wantSlotSegs & 1) === 1) wantSlotSegs += 1;
+    slotSegs = clamp(wantSlotSegs, 4, sealAboveSlot ? 36 : Math.max(4, Math.floor(requestedN / 6) & ~1));
     if ((slotSegs & 1) === 1) slotSegs += 1;
-    if (slotSegs > Math.floor(N / 6)) {
-      slotSegs = Math.max(4, Math.floor(N / 6) & ~1);
-    }
+
     for (let u = 0; u <= slotSegs; u++) {
-      thetas[u] = -halfAlpha + (2 * halfAlpha * u) / slotSegs;
+      thetaList.push(-halfAlpha + (2 * halfAlpha * u) / slotSegs);
     }
-    const rest = N - slotSegs;
-    const span = 2 * Math.PI - 2 * halfAlpha;
-    for (let k = 1; k < rest; k++) {
-      thetas[slotSegs + k] = halfAlpha + (span * k) / rest;
+
+    // Collect remaining angles strictly inside (halfAlpha, 2π - halfAlpha)
+    const restStart = halfAlpha;
+    const restEnd = 2 * Math.PI - halfAlpha;
+    const restSegs = Math.max(36, requestedN - Math.min(slotSegs, Math.floor(requestedN / 4)));
+    const rawRest: number[] = [];
+    for (let k = 1; k < restSegs; k++) {
+      rawRest.push(restStart + ((restEnd - restStart) * k) / restSegs);
+    }
+
+    // Locally refine angular intervals overlapping the Hanko seal window
+    if (authorSeal) {
+      const addFineRange = (a: number, b: number) => {
+        const lo = Math.max(restStart + 1e-3, a);
+        const hi = Math.min(restEnd - 1e-3, b);
+        if (hi <= lo + 1e-3) return;
+        const steps = Math.max(2, Math.round((hi - lo) / sealTargetDTheta));
+        for (let k = 0; k <= steps; k++) {
+          rawRest.push(lo + ((hi - lo) * k) / steps);
+        }
+      };
+
+      if (sealAboveSlot) {
+        addFineRange(halfAlpha, sealHalfAng);
+        addFineRange(2 * Math.PI - sealHalfAng, 2 * Math.PI - halfAlpha);
+      } else {
+        const cNorm = ((authorSeal.centerTheta % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+        addFineRange(cNorm - sealHalfAng, cNorm + sealHalfAng);
+      }
+    }
+
+    rawRest.sort((a, b) => a - b);
+    let lastA = halfAlpha;
+    for (const ang of rawRest) {
+      if (ang - lastA > 5e-4 && restEnd - ang > 5e-4) {
+        thetaList.push(ang);
+        lastA = ang;
+      }
     }
   } else {
-    for (let u = 0; u < N; u++) {
-      thetas[u] = (2 * Math.PI * u) / N;
+    const rawAngles: number[] = [];
+    for (let u = 0; u < requestedN; u++) {
+      rawAngles.push((2 * Math.PI * u) / requestedN);
+    }
+    if (authorSeal) {
+      const cNorm = ((authorSeal.centerTheta % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+      const steps = Math.max(8, Math.round((2 * sealHalfAng) / sealTargetDTheta));
+      for (let k = 0; k <= steps; k++) {
+        const ang = (((cNorm - sealHalfAng + (2 * sealHalfAng * k) / steps) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+        rawAngles.push(ang);
+      }
+    }
+    rawAngles.sort((a, b) => a - b);
+    for (const ang of rawAngles) {
+      if (thetaList.length === 0 || (ang - thetaList[thetaList.length - 1] > 5e-4 && 2 * Math.PI - ang > 5e-4)) {
+        thetaList.push(ang);
+      }
     }
   }
+
+  const N = thetaList.length;
+  const thetas = new Float64Array(thetaList);
 
   if (!cordSlot) {
     const loop = [...outerNodes, ...innerNodes];
@@ -474,6 +768,12 @@ export function buildIndependentBase(
     ribFadeStart: number,
     ribFadeEnd: number
   ): void => {
+    // Anchor outer[2] explicitly at yStart (gableClearY = 9.0 mm) so the 45° cord gable stays isolated
+    // in [outer[1], outer[2]] and the rear Hanko Z☰ seal subdivides cleanly across the entire body!
+    if (outer.length === 0 || yStart > outer[outer.length - 1].y + 0.2) {
+      outer.push(makeRibbedNode(yStart, rAtY(yStart), ribFadeStart, ribFadeEnd));
+    }
+
     const wantGrooves = Boolean(base.signatureGrooves) && yEnd - yStart >= 9.0;
     if (!wantGrooves) {
       for (let i = 1; i <= segs; i++) {
@@ -539,6 +839,7 @@ export function buildIndependentBase(
   const slotH = BASE_CORD_SLOT_HEIGHT_MM; // 5.0 mm
   const slotW = BASE_CORD_SLOT_WIDTH_MM; // 6.5 mm
   const gableClearY = slotH + 4.0; // 9.0 mm safe ceiling above 45° peaked cord roof
+  const wantAuthorSeal = base.authorSeal !== false && !clipHeightMm;
 
   // --- STYLE 0: COMPACT FLUSH (Ø 75.0 × 15.0 mm Bambu LED Kit 001 housing with 3-lug bayonet) ---
   if (base.style === 'compact_flush') {
@@ -607,26 +908,48 @@ export function buildIndependentBase(
       inner.push({ y: 0, r: rBot });
     }
 
-    buildClosedRevolutionWithOptionalCordSlot(mb, N, outer, inner, {
-      widthMm: cfSlotW,
-      heightMm: cfSlotH,
-    });
+    const compactSeal: AuthorSealSpec | null =
+      wantAuthorSeal && totalH >= 14.5
+        ? {
+            centerTheta: 0, // Directly above rear USB cord slot, 100% clear of 3 bayonet lugs at 60°, 180°, 300°!
+            yCenter: 10.25,
+            widthMm: 10.0,
+            heightMm: 8.8,
+            depthMm: OZEK_HANKO_SEAL_DEPTH_MM,
+            refRadiusMm: rCollar,
+          }
+        : null;
+
+    buildClosedRevolutionWithOptionalCordSlot(
+      mb,
+      N,
+      outer,
+      inner,
+      { widthMm: cfSlotW, heightMm: cfSlotH },
+      compactSeal,
+      draft
+    );
     return mb;
   }
 
-  // --- STYLE 1: DOME ---
+  // --- STYLE 1: DOME (with optional E26/E27 elevated slender stem "palito" + 45° flare!) ---
   if (base.style === 'dome') {
     const domeH = Math.max(36, base.height);
-    const fullTopY = domeH + couplingH;
+    const stemH = getEffectiveDomeStemHeightMm(config);
+    const flareH = getDomeStemFlareHeightMm(config);
+    const hasStem = stemH > 0.1 && !isLed;
+    const couplingStartY = hasStem ? domeH + stemH + flareH : domeH;
+    const fullTopY = couplingStartY + couplingH;
     const maxClipY = clipHeightMm ? Math.min(fullTopY, clipHeightMm) : fullTopY;
 
     const rFoot = Math.max(rNeck + 10, base.footRadius);
-    const rShoulder = rNeck + (base.coupling === 'gravity_seat' ? 5.5 : 4.0);
+    const rShoulder = rNeck + (base.coupling === 'gravity_seat' ? 4.5 : hasStem ? 2.5 : 4.0);
+    const rDomeCrown = hasStem ? DOME_STEM_OUTER_RADIUS_MM + 1.5 : rShoulder;
 
     const domeRAt = (y: number): number => {
       const t = clamp(y / domeH, 0, 1);
       const arch = Math.sqrt(Math.max(0, 1 - Math.pow(t, 1.85)));
-      return rShoulder + (rFoot - rShoulder) * arch;
+      return rDomeCrown + (rFoot - rDomeCrown) * arch;
     };
 
     if (clipHeightMm && clipHeightMm < domeH - 5) {
@@ -677,7 +1000,23 @@ export function buildIndependentBase(
       slotH,
       domeH
     );
-    appendMaleCouplingNodes(outer, domeH, maxClipY);
+
+    if (hasStem) {
+      const stemTopY = domeH + stemH;
+      // Smooth neck transition into Ø 30 mm slender vertical stem, then 45° self-supporting flare up to E26 collar!
+      outer.push({ y: domeH + 1.5, r: DOME_STEM_OUTER_RADIUS_MM });
+      outer.push({ y: stemTopY, r: DOME_STEM_OUTER_RADIUS_MM });
+      const flareSegs = 4;
+      for (let i = 1; i <= flareSegs; i++) {
+        const frac = i / flareSegs;
+        outer.push({
+          y: stemTopY + flareH * frac,
+          r: DOME_STEM_OUTER_RADIUS_MM + (rShoulder - DOME_STEM_OUTER_RADIUS_MM) * frac,
+        });
+      }
+    }
+
+    appendMaleCouplingNodes(outer, couplingStartY, maxClipY);
 
     const inner: ProfileNode[] = [];
     if (isLed) {
@@ -692,6 +1031,36 @@ export function buildIndependentBase(
         true,
         0
       );
+    } else if (hasStem) {
+      // Elevated E26/E27 support shelf at couplingStartY -> upward-facing funnel into Ø18 mm hollow stem -> 45° dome vault!
+      const ceilingBotY = couplingStartY - e26CeilingThick;
+      const stemTopY = domeH + stemH;
+      const rStemIn = DOME_STEM_INNER_RADIUS_MM;
+      inner.push({ y: maxClipY, r: Math.max(e26.holeRadiusMm + 1.5, rNeck - 3.2) });
+      inner.push({ y: couplingStartY, r: e26.holeRadiusMm });
+      inner.push({ y: ceilingBotY, r: e26.holeRadiusMm });
+      // Smooth internal cable funnel from E26 hole inward to Ø 18 mm hollow stem bore (0% overhang!)
+      if (ceilingBotY > stemTopY + 0.8) {
+        inner.push({ y: stemTopY, r: rStemIn });
+      }
+      inner.push({ y: domeH, r: rStemIn });
+      // 45° self-supporting dome vault expanding from rStemIn out to rBotCav inside the dome body!
+      const rBotCav = Math.max(e26.holeRadiusMm + 6.0, rFoot - 4.8);
+      const vaultSegs = 6;
+      const totalVaultDrop = Math.min(domeH - gableClearY, Math.max(6, rBotCav - rStemIn));
+      for (let i = 1; i <= vaultSegs; i++) {
+        const frac = i / vaultSegs;
+        const y = domeH - totalVaultDrop * frac;
+        const r45 = rStemIn + (domeH - y); // strictly <= 45° overhang!
+        const rWallBound = Math.max(rStemIn + 2.5, domeRAt(y) - 4.2);
+        inner.push({ y, r: Math.min(r45, rWallBound, rBotCav) });
+      }
+      const rLowest = Math.min(rBotCav, rStemIn + (domeH - gableClearY));
+      if (domeH - totalVaultDrop > gableClearY + 1.0) {
+        inner.push({ y: gableClearY, r: rLowest });
+      }
+      inner.push({ y: slotH, r: rLowest });
+      inner.push({ y: 0, r: rLowest });
     } else {
       // 45° vaulted internal dome ceiling -> 100% support-free!
       const ceilingBotY = domeH - e26CeilingThick;
@@ -717,10 +1086,35 @@ export function buildIndependentBase(
       inner.push({ y: 0, r: rLowest });
     }
 
-    buildClosedRevolutionWithOptionalCordSlot(mb, N, outer, inner, {
-      widthMm: slotW,
-      heightMm: slotH,
-    });
+    const domeAvailH = domeH - gableClearY - 2.4;
+    const domeSealH = clamp(domeAvailH, 9.5, 16.0);
+    const domeSealW = Math.min(14.0, domeSealH * 0.88);
+    const domeSealY = clamp(
+      gableClearY + domeAvailH * 0.5 + 1.2,
+      gableClearY + domeSealH * 0.5 + 0.8,
+      domeH - domeSealH * 0.5 - 1.2
+    );
+    const domeSeal: AuthorSealSpec | null =
+      wantAuthorSeal && domeAvailH >= 10.0
+        ? {
+            centerTheta: 0,
+            yCenter: domeSealY,
+            widthMm: domeSealW,
+            heightMm: domeSealH,
+            depthMm: OZEK_HANKO_SEAL_DEPTH_MM,
+            refRadiusMm: domeRAt(domeSealY),
+          }
+        : null;
+
+    buildClosedRevolutionWithOptionalCordSlot(
+      mb,
+      N,
+      outer,
+      inner,
+      { widthMm: slotW, heightMm: slotH },
+      domeSeal,
+      draft
+    );
     return mb;
   }
 
@@ -758,10 +1152,28 @@ export function buildIndependentBase(
         0
       );
 
-      buildClosedRevolutionWithOptionalCordSlot(mb, N, outer, inner, {
-        widthMm: slotW,
-        heightMm: slotH,
-      });
+      const conkelLedSeal: AuthorSealSpec | null =
+        wantAuthorSeal && maxClipY >= flangeH + 9.2
+          ? {
+              // Seated cleanly on rear collar at 180° (clear of cord slot & bayonet lugs)
+              centerTheta: couplingUsesBayonet(base) ? Math.PI / 3 : Math.PI,
+              yCenter: flangeH + couplingH * 0.5,
+              widthMm: 9.6,
+              heightMm: Math.min(9.0, couplingH - 1.4),
+              depthMm: OZEK_HANKO_SEAL_DEPTH_MM,
+              refRadiusMm: rNeck,
+            }
+          : null;
+
+      buildClosedRevolutionWithOptionalCordSlot(
+        mb,
+        N,
+        outer,
+        inner,
+        { widthMm: slotW, heightMm: slotH },
+        conkelLedSeal,
+        draft
+      );
       return mb;
     } else {
       const coneTopY = Math.max(flangeH + couplingH + 12, base.height);
@@ -807,17 +1219,37 @@ export function buildIndependentBase(
         inner.push({ y: 0, r: rConeInnerWall });
       }
 
-      buildClosedRevolutionWithOptionalCordSlot(mb, N, outer, inner, {
-        widthMm: slotW,
-        heightMm: slotH,
-      });
+      const conkelConeSpan = maxClipY - (couplingEndY + 2.2);
+      const conkelSealH = clamp(conkelConeSpan - 2.0, 9.5, 15.0);
+      const conkelConeY = couplingEndY + 1.4 + conkelConeSpan * 0.5;
+      const conkelE26Seal: AuthorSealSpec | null =
+        wantAuthorSeal && conkelConeSpan >= 11.5
+          ? {
+              centerTheta: 0,
+              yCenter: conkelConeY,
+              widthMm: Math.min(13.5, conkelSealH * 0.88),
+              heightMm: conkelSealH,
+              depthMm: OZEK_HANKO_SEAL_DEPTH_MM,
+              refRadiusMm: (rNeck + rConeTopOut) * 0.5,
+            }
+          : null;
+
+      buildClosedRevolutionWithOptionalCordSlot(
+        mb,
+        N,
+        outer,
+        inner,
+        { widthMm: slotW, heightMm: slotH },
+        conkelE26Seal,
+        draft
+      );
       return mb;
     }
   }
 
   // --- STYLE 3: PEDESTAL ---
   if (base.style === 'pedestal') {
-    const pedH = Math.max(38, base.height);
+    const pedH = Math.max(26, base.height);
     const fullTopY = pedH + couplingH;
     const maxClipY = clipHeightMm ? Math.min(fullTopY, clipHeightMm) : fullTopY;
 
@@ -904,16 +1336,36 @@ export function buildIndependentBase(
       inner.push({ y: 0, r: rEnd });
     }
 
-    buildClosedRevolutionWithOptionalCordSlot(mb, N, outer, inner, {
-      widthMm: slotW,
-      heightMm: slotH,
-    });
+    const pedAvailH = pedH - gableClearY - 2.0;
+    const pedSealH = clamp(pedAvailH, 9.5, 16.0);
+    const pedSealY = gableClearY + 1.0 + pedAvailH * 0.5;
+    const pedSeal: AuthorSealSpec | null =
+      wantAuthorSeal && pedAvailH >= 10.0
+        ? {
+            centerTheta: 0,
+            yCenter: pedSealY,
+            widthMm: Math.min(14.0, pedSealH * 0.88),
+            heightMm: pedSealH,
+            depthMm: OZEK_HANKO_SEAL_DEPTH_MM,
+            refRadiusMm: coneRAt(pedSealY),
+          }
+        : null;
+
+    buildClosedRevolutionWithOptionalCordSlot(
+      mb,
+      N,
+      outer,
+      inner,
+      { widthMm: slotW, heightMm: slotH },
+      pedSeal,
+      draft
+    );
     return mb;
   }
 
   // --- STYLE 4: CYLINDER ---
   if (base.style === 'cylinder') {
-    const drumH = Math.max(36, base.height);
+    const drumH = Math.max(26, base.height);
     const revealH = Math.max(0, base.collarRevealMm);
     const fullTopY = drumH + revealH + couplingH;
     const maxClipY = clipHeightMm ? Math.min(fullTopY, clipHeightMm) : fullTopY;
@@ -1004,10 +1456,30 @@ export function buildIndependentBase(
       inner.push({ y: 0, r: rSafeCav });
     }
 
-    buildClosedRevolutionWithOptionalCordSlot(mb, N, outer, inner, {
-      widthMm: slotW,
-      heightMm: slotH,
-    });
+    const cylAvailH = drumH - 1.4 - gableClearY - 1.4;
+    const cylSealH = clamp(cylAvailH, 9.5, 16.0);
+    const cylSealY = gableClearY + 0.7 + cylAvailH * 0.5;
+    const cylSeal: AuthorSealSpec | null =
+      wantAuthorSeal && cylAvailH >= 10.0
+        ? {
+            centerTheta: 0,
+            yCenter: cylSealY,
+            widthMm: Math.min(14.0, cylSealH * 0.88),
+            heightMm: cylSealH,
+            depthMm: OZEK_HANKO_SEAL_DEPTH_MM,
+            refRadiusMm: rDrum,
+          }
+        : null;
+
+    buildClosedRevolutionWithOptionalCordSlot(
+      mb,
+      N,
+      outer,
+      inner,
+      { widthMm: slotW, heightMm: slotH },
+      cylSeal,
+      draft
+    );
     return mb;
   }
 
@@ -1050,7 +1522,26 @@ export function buildIndependentBase(
     collarInner.push({ y: ringBotY, r: rInnerHole + 4.0 });
   }
 
-  buildClosedRevolutionWithOptionalCordSlot(mb, N, collarOuter, collarInner, null);
+  const tripodSeal: AuthorSealSpec | null = wantAuthorSeal
+    ? {
+        centerTheta: Math.PI * 0.5, // Midpoint between tripod legs (30° and 150°)
+        yCenter: (ringBotY + ringTopY) * 0.5,
+        widthMm: 10.0,
+        heightMm: Math.min(11.0, ringThickH - 3.0),
+        depthMm: OZEK_HANKO_SEAL_DEPTH_MM,
+        refRadiusMm: rCollarOut,
+      }
+    : null;
+
+  buildClosedRevolutionWithOptionalCordSlot(
+    mb,
+    N,
+    collarOuter,
+    collarInner,
+    null,
+    tripodSeal,
+    draft
+  );
 
   // Clamp leg outward spread so leg angle is strictly < 42° when printed upside down (0% supports!)
   const rTopLeg = rCollarOut - 1.5;

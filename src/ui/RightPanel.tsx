@@ -911,6 +911,30 @@ export const RightPanel: React.FC<RightPanelProps> = ({
               onChange={(ribCount) => updateHelical({ ribCount }, true)}
               onCommit={onCommitGeometry}
             />
+            <label
+              className={`flex items-center justify-between gap-2 px-3 py-2 rounded-xl border cursor-pointer transition-colors ${
+                config.helical.obiBelt
+                  ? isNight
+                    ? 'bg-amber-500/12 border-amber-400/40'
+                    : 'bg-amber-50/80 border-amber-300/80'
+                  : isNight
+                    ? 'bg-zinc-800/40 border-zinc-700/60'
+                    : 'bg-zinc-900/[0.02] border-zinc-900/[0.08]'
+              }`}
+            >
+              <div>
+                <div className="text-[12px] font-semibold">Cinturón ☰ (3 anillos en cintura)</div>
+                <div className={`text-[10.5px] ${mutedText}`}>
+                  3 anillos redondeados (1.8 mm · ≤ 45°, 0% soportes · EN 03)
+                </div>
+              </div>
+              <input
+                type="checkbox"
+                checked={Boolean(config.helical.obiBelt)}
+                onChange={(e) => updateHelical({ obiBelt: e.target.checked }, false)}
+                className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+              />
+            </label>
             <label className="flex items-center justify-between cursor-pointer pt-1">
               <span className="text-[12.5px] font-medium">Doble perfil diamante (F017)</span>
               <input
@@ -1141,9 +1165,9 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                   updateWoven(
                     {
                       pattern,
-                      horizFreq: Math.min(44, Math.max(24, Math.min(34, config.woven.horizFreq))),
-                      vertFreq: Math.min(32, Math.max(18, Math.min(24, config.woven.vertFreq))),
-                      rippleDepth: config.woven.rippleDepth ?? 4.8,
+                      horizFreq: Math.min(44, Math.max(16, Math.min(34, config.woven.horizFreq))),
+                      vertFreq: Math.min(32, Math.max(12, Math.min(24, config.woven.vertFreq))),
+                      rippleDepth: config.woven.rippleDepth ?? 5.5,
                     },
                     false
                   )
@@ -1159,9 +1183,9 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                       ? 'Ondas radiales (celdas)'
                       : 'Columnas de rejilla'
                   }
-                  value={Math.min(44, Math.max(24, config.woven.horizFreq))}
-                  defaultValue={32}
-                  min={24}
+                  value={Math.min(44, Math.max(16, config.woven.horizFreq))}
+                  defaultValue={20}
+                  min={16}
                   max={44}
                   step={2}
                   dark={isNight}
@@ -1170,9 +1194,9 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                 />
                 <StudioSlider
                   label="Filas verticales de celdas"
-                  value={Math.min(32, Math.max(18, config.woven.vertFreq))}
-                  defaultValue={24}
-                  min={18}
+                  value={Math.min(32, Math.max(12, config.woven.vertFreq))}
+                  defaultValue={16}
+                  min={12}
                   max={32}
                   step={2}
                   dark={isNight}
@@ -1778,6 +1802,57 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                   </div>
                 )}
 
+                {/* Rear Hanko Author Seal "Z☰" toggle — available across ALL base styles! */}
+                <label
+                  className={`flex items-center justify-between gap-2 px-3 py-2 rounded-xl border cursor-pointer transition-colors ${
+                    config.base.authorSeal !== false
+                      ? isNight
+                        ? 'bg-amber-500/12 border-amber-400/40'
+                        : 'bg-amber-50/80 border-amber-300/80'
+                      : isNight
+                        ? 'bg-zinc-800/40 border-zinc-700/60'
+                        : 'bg-zinc-900/[0.02] border-zinc-900/[0.08]'
+                  }`}
+                >
+                  <div>
+                    <div className="text-[12px] font-semibold">
+                      Sello de autor OZ☰K (Trasero)
+                    </div>
+                    <div className={`text-[10.5px] ${mutedText}`}>
+                      Hanko Z☰ en bajorrelieve (0.6 mm · 0% soportes)
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={config.base.authorSeal !== false}
+                    onChange={(e) => updateBase({ authorSeal: e.target.checked }, false)}
+                    className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                  />
+                </label>
+
+                {config.base.style === 'dome' && (
+                  config.mount.type === 'e26_e27' ? (
+                    <StudioSlider
+                      label="Cuello elevado en cúpula (E26/E27)"
+                      value={config.base.domeStemHeightMm ?? 0}
+                      defaultValue={14}
+                      min={0}
+                      max={22}
+                      step={1}
+                      unit="mm"
+                      minLabel="Sin cuello"
+                      maxLabel="22 mm"
+                      dark={isNight}
+                      onChange={(domeStemHeightMm) => updateBase({ domeStemHeightMm }, true)}
+                      onCommit={onCommitGeometry}
+                    />
+                  ) : (
+                    <div className={`text-[10.5px] px-2.5 py-1.5 rounded-lg border ${divider} ${mutedText}`}>
+                      Cuello elevado desactivado automáticamente con Bambu LED Kit 001 (Ø 59.7 mm).
+                    </div>
+                  )
+                )}
+
                 {config.base.style !== 'tripod' && config.base.style !== 'compact_flush' && (
                   <>
                     <SegmentedControl
@@ -1994,7 +2069,13 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                           label="Altura de base"
                           value={config.base.height}
                           defaultValue={defaultForFamily.base.height}
-                          min={config.base.style === 'conkel' ? 16 : 40}
+                          min={
+                            config.base.style === 'conkel'
+                              ? 16
+                              : config.base.style === 'cylinder' || config.base.style === 'pedestal'
+                                ? 26
+                                : 40
+                          }
                           max={110}
                           step={2}
                           unit="mm"

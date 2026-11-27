@@ -24,6 +24,10 @@ export const COMPACT_FLUSH_LUG_Y_END = 12.3;
 export const COMPACT_FLUSH_TWIST_Y_LOW = 6.1;
 export const COMPACT_FLUSH_TWIST_Y_HIGH = 13.8;
 
+/** Slender hollow stem ("palito") outer/inner radii for E26/E27 elevated Dome bases (Ø 30 mm outer / Ø 18 mm inner) */
+export const DOME_STEM_OUTER_RADIUS_MM = 15.0;
+export const DOME_STEM_INNER_RADIUS_MM = 9.0;
+
 /**
  * Bayonet vertical geometry constants (mm, localY from collar bottom = 0):
  *  - Male lug lives strictly inside y ∈ [2.2, 7.2] (45° print chamfer up 2.2..3.6, plateau 3.6..6.4, down 6.4..7.2)
@@ -82,6 +86,29 @@ export function getEffectiveNeckRadius(config: LampConfig): number {
 }
 
 /**
+ * Active elevated hollow stem height (mm) on Dome bases (0 - 22 mm).
+ * Automatically disabled (0 mm) whenever Bambu LED Kit 001 (Ø 59.7 mm) is selected.
+ */
+export function getEffectiveDomeStemHeightMm(config: LampConfig): number {
+  if (config.base.style !== 'dome' || config.mount.type !== 'e26_e27') {
+    return 0;
+  }
+  return clamp(config.base.domeStemHeightMm ?? 0, 0, 22);
+}
+
+/**
+ * Computes the vertical 45° self-supporting flare height (mm) above the slender Ø 30 mm dome stem
+ * up to the E26/E27 mounting collar shoulder.
+ */
+export function getDomeStemFlareHeightMm(config: LampConfig): number {
+  const stemH = getEffectiveDomeStemHeightMm(config);
+  if (stemH <= 0.1) return 0;
+  const rNeck = getEffectiveNeckRadius(config);
+  const rShoulder = rNeck + (config.base.coupling === 'gravity_seat' ? 4.5 : 2.5);
+  return Math.max(4, Math.ceil(Math.max(0, rShoulder - DOME_STEM_OUTER_RADIUS_MM)));
+}
+
+/**
  * Computes the height (mm) at which the Shade's seating reference rests on top of the Base.
  * For 'compact_flush', the shade rests 100% flush on the table (seatY = 0) and the 15 mm base
  * locks into the embedded female bayonet socket inside the sphere's bottom opening.
@@ -95,7 +122,15 @@ export function getShadeSeatY(config: LampConfig): number {
     return mount.type === 'led_kit_001' ? 11.2 : 8.0;
   }
   if (base.style === 'cylinder') {
-    return base.height + base.collarRevealMm;
+    return Math.max(26, base.height) + base.collarRevealMm;
+  }
+  if (base.style === 'dome') {
+    const domeH = Math.max(36, base.height);
+    const stemH = getEffectiveDomeStemHeightMm(config);
+    if (stemH > 0.1) {
+      return domeH + stemH + getDomeStemFlareHeightMm(config);
+    }
+    return domeH;
   }
   return base.height;
 }

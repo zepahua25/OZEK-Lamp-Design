@@ -10,7 +10,7 @@ import {
 interface OzekCollectionPanelProps {
   activePieceId: string | null;
   isNight: boolean;
-  onSelectPiece: (piece: OzekSignaturePiece) => void;
+  onSelectPiece: (piece: OzekSignaturePiece, overrideOrganicMode?: 'gravity' | 'wind') => void;
   onApplyPaletteColor: (target: 'shade' | 'base', material: MaterialPresetId) => void;
 }
 
@@ -62,7 +62,7 @@ export const OzekCollectionPanel: React.FC<OzekCollectionPanelProps> = ({
       >
         <div>
           <div className="flex items-center gap-1.5">
-            <span className="text-[13px] font-bold tracking-[0.08em]">Colección OZ☰K</span>
+            <span className="text-[13px] font-bold tracking-[0.06em]">Colección 01 · OZ☰K</span>
           </div>
           <p className={`text-[11px] italic mt-0.5 ${mutedText}`}>
             “Damos alma a cada pieza.”
@@ -163,17 +163,25 @@ export const OzekCollectionPanel: React.FC<OzekCollectionPanelProps> = ({
         {OZEK_SIGNATURE_COLLECTION.map((piece) => {
           const isActive = activePieceId === piece.id;
           return (
-            <button
+            <div
               key={piece.id}
-              type="button"
+              role="button"
+              tabIndex={0}
               onClick={() => onSelectPiece(piece)}
-              className={`w-full text-left p-2.5 rounded-2xl border transition-all active:scale-[0.99] ${
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onSelectPiece(piece);
+                }
+              }}
+              className={`w-full text-left p-2.5 rounded-2xl border transition-all cursor-pointer active:scale-[0.99] ${
                 isActive ? activeCardBg : cardBg
               }`}
             >
               <div className="flex items-center justify-between gap-1.5">
                 <span className="text-[12px] font-bold tracking-tight">
-                  {piece.code} · {piece.title}
+                  {piece.code}{' '}
+                  <span className="opacity-80 font-medium">· {piece.kanji}</span>
                 </span>
                 <div className="flex items-center -space-x-1 shrink-0">
                   <span
@@ -186,16 +194,23 @@ export const OzekCollectionPanel: React.FC<OzekCollectionPanelProps> = ({
                   />
                 </div>
               </div>
+              <div
+                className={`text-[10.5px] font-semibold mt-0.5 ${
+                  isActive ? (isNight ? 'text-amber-200' : 'text-zinc-100') : ''
+                }`}
+              >
+                {piece.title}
+              </div>
               <p
-                className={`text-[10.5px] leading-snug mt-1 ${
+                className={`text-[10px] leading-snug mt-0.5 ${
                   isActive ? (isNight ? 'text-amber-100/80' : 'text-zinc-300') : mutedText
                 }`}
               >
-                {piece.subtitle}
+                {piece.narrative}
               </p>
-              <div className="mt-1.5">
+              <div className="mt-1.5 flex items-center flex-wrap gap-1">
                 <span
-                  className={`inline-block text-[9.5px] font-medium px-2 py-0.5 rounded-full ${
+                  className={`inline-block text-[9px] font-medium px-2 py-0.5 rounded-full ${
                     isActive
                       ? isNight
                         ? 'bg-amber-400/20 text-amber-200'
@@ -207,8 +222,29 @@ export const OzekCollectionPanel: React.FC<OzekCollectionPanelProps> = ({
                 >
                   {piece.badge}
                 </span>
+                {piece.quickWindShortcut && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelectPiece(piece, 'wind');
+                    }}
+                    title="Abrir ZOUKEI 02 directamente en variante Viento"
+                    className={`text-[9px] font-semibold px-2 py-0.5 rounded-full border transition-colors ${
+                      isActive
+                        ? isNight
+                          ? 'border-amber-300/50 text-amber-200 hover:bg-amber-400/20'
+                          : 'border-white/30 text-white hover:bg-white/15'
+                        : isNight
+                          ? 'border-zinc-600 text-zinc-300 hover:bg-zinc-700'
+                          : 'border-zinc-300 text-zinc-700 hover:bg-zinc-200/70'
+                    }`}
+                  >
+                    Viento →
+                  </button>
+                )}
               </div>
-            </button>
+            </div>
           );
         })}
       </div>

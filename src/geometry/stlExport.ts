@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { STLExporter } from 'three/examples/jsm/exporters/STLExporter.js';
 import { LampConfig, LampMetrics, MeshPartData } from '../types/lamp';
 import { getEffectiveShadeHeight } from './silhouette';
+import { detectOzekCollectionPiece } from '../data/ozekCollection';
 import { buildZipArchive, ZipEntryInput } from './zipWriter';
 
 export interface StlExportOptions {
@@ -99,16 +100,35 @@ export function generateBambuStudioGuide(
     config.family === 'woven' ||
     config.family === 'japanese_flute' ||
     config.silhouette.includeDiffuser;
+  const effShadeH = getEffectiveShadeHeight(config.silhouette);
+  const sizeLabel =
+    effShadeH < 138
+      ? 'XS (125 mm)'
+      : effShadeH < 160
+        ? 'S (150 mm)'
+        : effShadeH < 185
+          ? 'M (170 mm)'
+          : effShadeH < 218
+            ? 'L (200 mm)'
+            : 'XL (235 mm)';
+  const matchedPiece = detectOzekCollectionPiece(config);
+  const maxDimMm = Math.max(metrics.widthMm, metrics.depthMm, metrics.heightMm);
+  const fitsA1Strict = maxDimMm <= 245;
+  const hasAuthorSeal = isTwoPart && config.base.authorSeal !== false;
 
   const lines: string[] = [
     '====================================================================',
-    '  OZEK LAMP STUDIO v2.0 — AJUSTES RECOMENDADOS PARA BAMBU STUDIO',
+    '  OZ☰K STUDIO — Colección 01 ("Damos alma a cada pieza.")',
+    '  FICHA TÉCNICA DFM & AJUSTES PARA BAMBU STUDIO (BAMBU LAB A1)',
     '====================================================================',
     '',
+    `Serie             : ${matchedPiece ? `${matchedPiece.code} · ${matchedPiece.kanji} (${matchedPiece.title})` : `Diseño personalizado (${config.family})`}`,
+    `Talla de pantalla : ${sizeLabel} (altura efectiva ${Math.round(effShadeH)} mm)`,
     `Familia de diseño : ${config.family}`,
     `Arquitectura      : ${isTwoPart ? '2 Piezas (Base + Pantalla)' : isPendant ? 'Colgante (1 Pieza)' : 'Monobloque (1 Pieza)'}`,
-    `Montura / Socket  : ${config.mount.type === 'led_kit_001' ? `Bambu Lab LED Lamp Kit 001 (Ø${(59.5 + config.mount.ledTolerance).toFixed(1)} × 8.5 mm)` : `Socket E26/E27 (Ø${config.mount.e26Diameter.toFixed(1)} mm · techo ${config.mount.e26LipThickness.toFixed(1)} mm)`}`,
-    `Dimensiones aprox : Ø${Math.round(Math.max(metrics.widthMm, metrics.depthMm))} × ${Math.round(metrics.heightMm)} mm (${metrics.fitsBambuA1 ? 'Cabe en Bambu Lab A1 256³' : 'ADVERTENCIA: Excede 256 mm'})`,
+    `Montura / Socket  : ${config.mount.type === 'led_kit_001' ? `Bambu Lab LED Lamp Kit 001 (Ø${(59.5 + config.mount.ledTolerance).toFixed(1)} × 8.5 mm)` : `Socket E26/E27 (Ø${config.mount.e26Diameter.toFixed(1)} mm · techo ${config.mount.e26LipThickness.toFixed(1)} mm · compatible Adaptador LED 001)`}`,
+    `Verificación A1   : Ø${Math.round(Math.max(metrics.widthMm, metrics.depthMm))} × ${Math.round(metrics.heightMm)} mm (${fitsA1Strict ? '✓ OK ≤ 245 mm para Bambu Lab A1 256³' : metrics.fitsBambuA1 ? '✓ Cabe en Bambu Lab A1 (245–256 mm)' : 'ADVERTENCIA: Excede 256 mm'})`,
+    `Sello de autor Z☰ : ${hasAuthorSeal ? 'Activo (bajorrelieve 0.6 mm en cara trasera de la Base)' : 'Desactivado'}`,
     '',
     '--- ARCHIVOS INCLUIDOS EN ESTE PAQUETE ---',
     ...exportedFiles.map((f) => `  • ${f}`),
@@ -129,8 +149,12 @@ export function generateBambuStudioGuide(
 
   lines.push(
     '',
-    '--- ORIENTACIÓN EN CAMA (SIN SOPORTES) ---'
+    '--- ORIENTACIÓN EN CAMA Y NOTA HONESTA DE SOPORTES (DFM) ---'
   );
+
+  if (matchedPiece) {
+    lines.push(`  • Guía de serie   : ${matchedPiece.dfmSupportNote}`);
+  }
 
   if (isCompactFlush) {
     lines.push(
@@ -229,9 +253,10 @@ export function generateBambuStudioGuide(
     '     -> Activar Fuzzy Skin (Piel difusa) SOLO en la pared exterior de la Base:',
     '        • Fuzzy skin point distance : 0.8 mm',
     '        • Fuzzy skin thickness      : 0.3 mm',
-    '        (NO aplicar Fuzzy Skin en la zona de rosca/bayoneta ni en la pantalla translúcida).',
+    '        (IMPORTANTE: pintar bloqueo de Fuzzy Skin sobre el sello trasero Z☰ y sobre la',
+    '        zona de bayoneta/rosca; NO aplicar Fuzzy Skin en la pantalla translúcida).',
     '  4. Relleno en Base: 15% Gyroid (3 paredes). En Pantalla: 100% paredes / 0% relleno.',
-    '  5. Costura (Seam position): "Aligned" o "Back" (en la parte trasera junto a la ranura de cable).',
+    '  5. Costura (Seam position): "Aligned" o "Back" (desplazada a un costado del sello trasero Z☰).',
     '',
     '--- AVISO DE SEGURIDAD ELÉCTRICA ---',
     '  ⚠️  USAR EXCLUSIVAMENTE FOCOS LED DE BAJA TEMPERATURA (máx. 7–9 W, 2700K–3000K)',

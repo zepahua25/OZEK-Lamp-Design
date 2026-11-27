@@ -1,19 +1,29 @@
 import { LampConfig } from '../../types/lamp';
 import { DisplacementContext, DisplacementResult, LampFamilyDefinition } from '../registry';
 
+function clamp(v: number, min: number, max: number): number {
+  return v < min ? min : v > max ? max : v;
+}
+
+function smoothstep(e0: number, e1: number, x: number): number {
+  const t = clamp((x - e0) / (e1 - e0), 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
 /**
- * Estilo 2: Helicoidal / Espiral (Amber translucent twisted ribs + UMINO F017 Faceted Diamond Lattice).
+ * Estilo 2: Helicoidal / Espiral (Amber translucent twisted ribs, Faceted Diamond Lattice,
+ * and optional 3-ring horizontal Obi belt "☰" for OZ☰K EN 03).
  */
 export const helicalFamily: LampFamilyDefinition = {
   id: 'helical',
   name: 'Helicoidal / Espiral',
   shortName: 'Helicoidal',
-  tagline: 'Costillas en espiral ámbar o facetas diamante dobles con refracción cálida',
+  tagline: 'Costillas en espiral cálidas o torre reloj de arena ceñida con cinturón ☰',
 
   getResolution(config: LampConfig, draft: boolean) {
     const ribs = Math.round(config.helical.ribCount);
     const radialSegs = Math.min(360, Math.max(draft ? 128 : 220, ribs * (draft ? 4 : 7)));
-    const heightSegs = draft ? 76 : 150;
+    const heightSegs = config.helical.obiBelt ? (draft ? 140 : 240) : draft ? 76 : 150;
     return { radialSegs, heightSegs };
   },
 
@@ -30,8 +40,10 @@ export const helicalFamily: LampFamilyDefinition = {
       profile,
       doubleProfile,
       doubleMix,
+      obiBelt,
     } = config.helical;
 
+    const hasObiBelt = Boolean(obiBelt);
     const ribs = Math.max(12, Math.min(64, Math.round(ribCount)));
     const totalTwistRad = ((twistDeg * Math.PI) / 180) * twistDirection;
     const halfDepth = ribDepth * 0.5;
@@ -70,13 +82,46 @@ export const helicalFamily: LampFamilyDefinition = {
         const ridge2 = 1 - Math.abs(secondary);
         const diamondCell = Math.max(ridge1, ridge2 * mix) * 2 - 1;
         const classicCross = 0.5 * (primary + secondary * mix);
-        combined = profile === 'faceted' ? diamondCell * 0.8 + classicCross * 0.2 : classicCross * 0.65 + Math.max(primary, secondary * mix) * 0.35;
+        combined =
+          profile === 'faceted'
+            ? diamondCell * 0.8 + classicCross * 0.2
+            : classicCross * 0.65 + Math.max(primary, secondary * mix) * 0.35;
+      }
+
+      let outerOffset = combined * halfDepth;
+      let innerFollow = doubleProfile ? 0.3 : 0.42;
+
+      if (hasObiBelt) {
+        // 3 horizontal rounded Obi rings ("☰") cinched at the waist (v ≈ 0.46–0.54):
+        // +1.8 mm total relief, 2.5 mm spacing (-2.5, 0, +2.5 mm), <= 45° self-supporting flanks!
+        const yWaist = (ctx.v - 0.5) * ctx.height;
+        const absY = Math.abs(yWaist);
+        if (absY < 7.2) {
+          const beltEnv = 1 - smoothstep(3.85, 6.4, absY);
+          const ribFade = 1 - beltEnv;
+
+          let ringMax = 0;
+          const ringCenters = [-2.5, 0, 2.5];
+          for (let i = 0; i < 3; i++) {
+            const dy = Math.abs(yWaist - ringCenters[i]);
+            if (dy < 1.24) {
+              const u = dy / 1.24;
+              const profileVal = 0.5 * (1 + Math.cos(Math.PI * u));
+              if (profileVal > ringMax) ringMax = profileVal;
+            }
+          }
+
+          // Smooth raised collar (+0.95 mm over 2.55 mm -> 20°) + 3 rounded rings (+0.85 mm -> 1.80 mm total relief!)
+          const obiOffset = 0.95 * beltEnv + 0.85 * ringMax;
+          outerOffset = outerOffset * ribFade + obiOffset;
+          innerFollow = innerFollow * ribFade;
+        }
       }
 
       return {
-        outerOffset: combined * halfDepth,
+        outerOffset,
         // Semi-smooth inner wall gives natural translucent thickness bands when backlit
-        innerFollow: doubleProfile ? 0.3 : 0.42,
+        innerFollow,
       };
     };
   },
