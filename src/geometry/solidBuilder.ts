@@ -977,9 +977,16 @@ function buildLedKit001Monoblock(
 
   const outRing: Int32Array[] = [];
   const inRing: Int32Array[] = [];
+  const isClosedPoleMono =
+    Boolean(config.silhouette.closeTopDome) &&
+    !invertedForPendant &&
+    yMaxLocal >= config.silhouette.height * 0.9;
+  const monoCapWall = config.family === 'organic' ? 1.2 : wallT;
 
   for (let row = 0; row <= M; row++) {
     const yBase = yLevels[row];
+    const vRow = clamp(yBase / Math.max(totalHeight, 1), 0, 1);
+    const yInOffset = isClosedPoleMono ? monoCapWall * smoothstep(0.74, 1.0, vRow) : 0;
     const rowWaveBlend = waveAmp > 0.1 ? smoothstep(0.65, 1.0, row / M) : 0;
     const oArr = new Int32Array(N).fill(-1);
     const iArr = new Int32Array(N).fill(-1);
@@ -1000,7 +1007,7 @@ function buildLedKit001Monoblock(
         oArr[u] = mb.addCyl(s.rOut, theta, y, s.localThickness);
       }
       if (row >= DECK_ROW) {
-        iArr[u] = mb.addCyl(s.rIn, theta, y, s.localThickness);
+        iArr[u] = mb.addCyl(s.rIn, theta, Math.max(hDeck, y - yInOffset), s.localThickness);
       } else if (canVent && !(row === 0 && insideUsbInterior)) {
         iArr[u] = mb.addCyl(s.rIn, theta, y, s.localThickness);
       }
@@ -1125,12 +1132,6 @@ function buildLedKit001Monoblock(
       }
     }
   }
-
-  const isClosedPoleMono =
-    Boolean(config.silhouette.closeTopDome) &&
-    !invertedForPendant &&
-    yMaxLocal >= config.silhouette.height * 0.9;
-  const monoCapWall = config.family === 'organic' ? 1.2 : wallT;
 
   if (isClosedPoleMono) {
     closeTopDomePole(mb, N, outRing[M], inRing[M], yMaxLocal, monoCapWall);

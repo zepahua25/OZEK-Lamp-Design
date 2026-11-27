@@ -208,31 +208,60 @@ export interface WovenParams {
   fdmSmoothing: number; // 0 - 1
 }
 
-export type OrganicMode = 'flames' | 'gravity';
+export type OrganicMode = 'flames' | 'gravity' | 'growth' | 'wind';
+
+export type OrganicWindType = 'breeze' | 'gusts' | 'vortex';
 
 export interface OrganicParams {
-  /** 'flames' = support-free sinuous flame/petal fins (<=45°); 'gravity' = Simplex 3D Marching-Squares ribbons */
+  /**
+   * 'flames'  = support-free sinuous flame/petal fins (<=45°);
+   * 'gravity' = 3D Spherical Voronoi soft-cell physics on S² (non-crossing U/S folds);
+   * 'growth'  = meridional fins with differential-growth ruffled outer edge;
+   * 'wind'    = dense thin fins deflected by a 3D surface flow / vortex field on S²
+   */
   mode: OrganicMode;
   /** Number of sinuous flame fins (16 - 32) for 'flames' mode */
   finCount: number;
   /** Vertical petal wave cycles (2 - 6) for 'flames' mode */
   flameWaves: number;
-  /** Extruded fin radial depth out from the 1.2 mm smooth core (8 - 22 mm) */
+  /** Number of continuous Differential Curve Growth circuits (2 - 8, default 4) for 'gravity' mode */
+  voronoiCells: number;
+  /** Curvature stiffness / softness (0 = crisp bends, 1 = broad fluid F1 curves) */
+  voronoiSoftness: number;
+  /** Seed jitter / dispersion (0 = symmetric opposing starts, 1 = organic asymmetric) */
+  voronoiDispersion: number;
+  /** Visual toggle: paint each continuous Gravity circuit in a distinct OZEK palette color in the 3D viewer */
+  colorByStrand: boolean;
+  /** Differential-growth ruffle amplitude on outer fin edge (0 - 1 => 0% - 100%) for 'growth' mode */
+  growthAmp: number;
+  /** Number of meridional ruffled fins (18 - 36) for 'growth' mode */
+  growthFinCount: number;
+  /** Ruffle wave frequency (1.0 wide ruffles - 4.0 fine frills) for 'growth' mode */
+  growthFreq: number;
+  /** 3D surface wind flow preset ('breeze' | 'gusts' | 'vortex') for 'wind' mode */
+  windType: OrganicWindType;
+  /** Dense thin fin count (45 - 75) for 'wind' mode */
+  windFinCount: number;
+  /** Wind azimuth direction in degrees (0 - 360) for 'wind' mode */
+  windDirectionDeg: number;
+  /** Wind flow intensity percentage (0 - 200) for 'wind' mode */
+  windIntensity: number;
+  /** Extruded fin/ribbon radial depth out from the 1.2 mm smooth core (6 - 24 mm depending on mode) */
   finDepth: number;
-  /** Extruded fin wall thickness (1.2 - 2.2 mm) */
+  /** Extruded fin/ribbon wall thickness (1.0 - 2.2 mm depending on mode) */
   finThickness: number;
-  /** Upward tip inclination (0 - 1) to reduce overhangs on horizontal gravity ribbons */
+  /** Upward tip inclination (0 - 1) to reduce overhangs on Voronoi ribbons */
   finLift: number;
-  /** Physical gravity acceleration (-9.8 to +9.8 m/s²: Up <-> None <-> Down) for Gravity ribbon sag/lift */
+  /** Physical gravity acceleration (-9.8 to +9.8 m/s² => -1.0 Down <-> 0 None <-> +1.0 Up) */
   gravityAccel: number;
-  /** Spiral twist in degrees (0 - 180 deg) applied to Gravity ribbons */
+  /** Spiral twist in degrees (0 - 180 deg) */
   gravityTwistDeg: number;
-  /** Laplacian smoothing passes (1 - 5) controlling ribbon stiffness vs softness */
+  /** Legacy smoothing pass count kept for backward JSON compatibility */
   smoothPasses: number;
   scale: number; // 1.0 - 4.5
   warp: number; // 0.0 - 1.6
-  bands: number; // 3 - 7 isocurve levels for 'gravity' mode
-  depth: number; // legacy alias kept synchronized with finDepth
+  bands: number; // 3 - 7
+  depth: number; // alias synchronized with finDepth
   overhangSmoothing: number; // 0 - 1
   seed: number; // 1 - 9999
 }

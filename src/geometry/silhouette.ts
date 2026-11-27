@@ -347,9 +347,39 @@ export function evaluateSilhouetteRadius(
 }
 
 /**
+ * Detects whether the active SilhouetteParams correspond to the "Esfera" profile
+ * (either directly from the Esfera button or proportionally scaled via S/M/L presets).
+ */
+export function isSphereSilhouette(p: SilhouetteParams): boolean {
+  if (p.type === 'custom_spline' && p.controlPoints && p.controlPoints.length >= 5) {
+    const pts = p.controlPoints;
+    const r0 = pts[0].r;
+    const r1 = pts[1].r;
+    const r2 = pts[2].r;
+    const r3 = pts[3].r;
+    const r4 = pts[4].r;
+    if (r2 <= 25) return false;
+    const n0 = r0 / r2;
+    const n1 = r1 / r2;
+    const n3 = r3 / r2;
+    const n4 = r4 / r2;
+    // Matches SILHOUETTE_SPLINE_TEMPLATES.sphere ratios (44/94 ≈ 0.468, 80/94 ≈ 0.851) symmetrically
+    return (
+      Math.abs(n0 - n4) < 0.08 &&
+      Math.abs(n1 - n3) < 0.08 &&
+      Math.abs(n0 - 0.468) < 0.14 &&
+      Math.abs(n1 - 0.851) < 0.12
+    );
+  }
+  return false;
+}
+
+/**
  * Evaluates silhouette radius including optional smooth upper dome/sphere closure (`closeTopDome`):
- *  - LED Kit 001: closes smoothly in a spherical dome down to rCapOut = max(2.6, wallT + 1.2) mm at v = 1.0 (then capped at R = 0 mm pole!)
- *  - E26/E27    : closes smoothly down to a discreet Ø16 mm (rIn = 8.0 mm) top thermal vent hole!
+ *  - When profile is "Esfera" + `closeTopDome` is active: bypasses the 5-point spline entirely and evaluates
+ *    the EXACT mathematical sphere equation `r(y) = sqrt(max(0, R² - (y - yc)²))`, truncated cleanly at y = 0
+ *    (-0.78 * R below sphere center yc) and closing perfectly to the North Pole at y = yc + R!
+ *  - Other profiles + `closeTopDome`: smoothly closes upper crown to R = 0 mm (LED Kit 001) or Ø16 mm vent (E26/E27).
  */
 export function evaluateEffectiveSilhouetteRadius(
   vRaw: number,
@@ -359,6 +389,21 @@ export function evaluateEffectiveSilhouetteRadius(
   invertedForPendant = false
 ): number {
   const v = clamp(vRaw, 0, 1);
+
+  if (p.closeTopDome && !invertedForPendant && isSphereSilhouette(p)) {
+    // Exact mathematical sphere: base truncated at y = 0 => yc = 0.78 * R, North Pole at y = yc + R = 1.78 * R
+    const H = Math.max(60, p.height);
+    const R = clamp(H / 1.78, 34, 118);
+    const yc = 0.78 * R;
+    const rTopTarget = mountType === 'led_kit_001' ? Math.max(2.4, wallT + 1.1) : 8.0 + wallT;
+    // Exact sphere height where r(yTop) == rTopTarget (for LED 001 r=2.4 mm, yTop is within 0.03 mm of yc + R!)
+    const yTopExact = yc + Math.sqrt(Math.max(0, R * R - rTopTarget * rTopTarget));
+    const y = v * yTopExact;
+    const dy = y - yc;
+    const rExact = Math.sqrt(Math.max(0, R * R - dy * dy));
+    return Math.max(rTopTarget, rExact);
+  }
+
   const rawR = evaluateSilhouetteRadius(v, p);
   if (!p.closeTopDome || invertedForPendant) {
     return rawR;

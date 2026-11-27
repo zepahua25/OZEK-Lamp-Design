@@ -606,12 +606,14 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
   }, 30000);
 
   it('FIX-F — closes full Sphere/Dome cleanly to R = 0 mm (LED Kit 001, 0 degenerate pole tris) and Ø16 mm vent (E26/E27)', () => {
-    // 1. LED Kit 001 -> exact R = 0 mm closed North Pole without degenerate faces or open edges
+    // 1. LED Kit 001 -> exact R = 0 mm closed North Pole without degenerate faces or open edges (ZEN 02 1-Piece Integrated Sphere!)
     const zen = cloneConfig(OZEK_SIGNATURE_COLLECTION.find((p) => p.id === 'zen-02')!.config);
     expect(zen.silhouette.closeTopDome).toBe(true);
+    expect(zen.silhouette.buildMode).toBe('monoblock');
     expect(zen.mount.type).toBe('led_kit_001');
 
     const ledRes = generateLampGeometry(zen, { draft: true, validateManifold: true });
+    expect(ledRes.parts).toHaveLength(1);
     expect(ledRes.metrics.openEdges, 'closed sphere LED openEdges').toBe(0);
     expect(ledRes.metrics.nonManifoldEdges, 'closed sphere LED nonManifold').toBe(0);
     expect(ledRes.metrics.isWatertight, 'closed sphere LED watertight').toBe(true);
@@ -619,32 +621,33 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
     const shade = ledRes.parts.find((p) => p.role === 'shade')!;
     const pos = shade.positions;
     const idx = shade.indices;
-    let maxY = -Infinity;
+    let minY = Infinity;
     for (let i = 1; i < pos.length; i += 3) {
-      if (pos[i] > maxY) maxY = pos[i];
+      if (pos[i] < minY) minY = pos[i];
     }
-    // Verify polar vertex exists at R = 0.0 mm right at the North Pole!
+    // Strictly clipped at Z = 0: zero vertices drop below y = 0!
+    expect(minY, 'no Voronoi ribbon drops below bed y = 0').toBeGreaterThanOrEqual(-1e-4);
+
+    // Verify the exact North Pole vertex (x=0, z=0, y ≈ height + 0.35) exists with ZERO degenerate triangles
+    const expectedPoleY = zen.silhouette.height + 0.35;
     let hasPoleVertex = false;
     for (let i = 0; i < pos.length; i += 3) {
-      if (Math.abs(pos[i + 1] - maxY) < 0.05 && Math.hypot(pos[i], pos[i + 2]) < 1e-4) {
+      if (Math.abs(pos[i + 1] - expectedPoleY) < 0.15 && Math.hypot(pos[i], pos[i + 2]) < 1e-4) {
         hasPoleVertex = true;
         break;
       }
     }
     expect(hasPoleVertex, 'single North Pole vertex at R=0').toBe(true);
 
-    // Verify ZERO degenerate triangles touching the North Pole (area > 1e-5 mm²)
     let poleTriCount = 0;
     let degeneratePoleTris = 0;
     for (let t = 0; t < idx.length; t += 3) {
       const a = idx[t] * 3;
       const b = idx[t + 1] * 3;
       const c = idx[t + 2] * 3;
-      const touchesPole =
-        Math.abs(pos[a + 1] - maxY) < 0.05 ||
-        Math.abs(pos[b + 1] - maxY) < 0.05 ||
-        Math.abs(pos[c + 1] - maxY) < 0.05;
-      if (!touchesPole) continue;
+      const isPoleVert = (o: number) =>
+        Math.abs(pos[o + 1] - expectedPoleY) < 0.15 && Math.hypot(pos[o], pos[o + 2]) < 1e-4;
+      if (!isPoleVert(a) && !isPoleVert(b) && !isPoleVert(c)) continue;
       poleTriCount++;
       const ux = pos[b] - pos[a],
         uy = pos[b + 1] - pos[a + 1],
@@ -658,8 +661,10 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
     expect(poleTriCount, 'polar crown fan triangles').toBeGreaterThanOrEqual(48);
     expect(degeneratePoleTris, 'zero degenerate triangles at pole').toBe(0);
 
-    // 2. E26/E27 -> discreet Ø16 mm (r ≈ 8.0 mm) top thermal vent hole
+    // 2. E26/E27 (2-Piece) -> discreet Ø16 mm (r ≈ 8.0 mm) top thermal vent hole
     const e26Cfg = cloneConfig(zen);
+    e26Cfg.silhouette.buildMode = 'two_part';
+    e26Cfg.organic.mode = 'flames';
     e26Cfg.mount.type = 'e26_e27';
     const e26Res = generateLampGeometry(e26Cfg, { draft: true, validateManifold: true });
     expect(e26Res.metrics.openEdges, 'closed dome E26 openEdges').toBe(0);
@@ -689,7 +694,12 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
         draft: true,
         validateManifold: true,
       });
-      const expectedParts = piece.config.silhouette.includeDiffuser ? 3 : 2;
+      const expectedParts =
+        piece.config.silhouette.buildMode === 'monoblock'
+          ? 1
+          : piece.config.silhouette.includeDiffuser
+            ? 3
+            : 2;
       expect(parts.length, `${piece.code} part count`).toBe(expectedParts);
       expect(metrics.openEdges, `${piece.code} openEdges`).toBe(0);
       expect(metrics.nonManifoldEdges, `${piece.code} nonManifold`).toBe(0);
@@ -729,12 +739,40 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
     }
   }, 30000);
 
-  it('FIX-H — validates interactive 3D Sculpt brush strokes, Gravity -9.8/+9.8 m/s² & AMS Z-stripe guide', () => {
-    const cfg = cloneConfig(OZEK_SIGNATURE_COLLECTION[1].config); // ZEN 02 sphere
+  it('FIX-H — validates 3D Differential Curve Growth Gravity Circuits (2/4/6 continuous F1 tracks, 18–24 mm deep, Z >= 0) + Sculpt & AMS guide', () => {
+    for (const strands of [2, 4, 6]) {
+      for (const grav of [-9.8, 0, 9.8]) {
+        const cfg = cloneConfig(OZEK_SIGNATURE_COLLECTION[1].config); // ZEN 02 1-Piece Sphere
+        cfg.organic.mode = 'gravity';
+        cfg.organic.voronoiCells = strands;
+        cfg.organic.voronoiSoftness = strands === 2 ? 0.45 : 0.85;
+        cfg.organic.voronoiDispersion = 0.5;
+        cfg.organic.gravityAccel = grav;
+        cfg.organic.finDepth = 21;
+        cfg.organic.finThickness = 1.4;
+
+        const res = generateLampGeometry(cfg, { draft: true, validateManifold: true });
+        expect(res.parts).toHaveLength(1);
+        expect(res.metrics.openEdges, `circuits ${strands}s/${grav}g openEdges`).toBe(0);
+        expect(res.metrics.nonManifoldEdges, `circuits ${strands}s/${grav}g nonManifold`).toBe(0);
+        expect(res.metrics.isWatertight, `circuits ${strands}s/${grav}g watertight`).toBe(true);
+        expect(res.metrics.volumeCm3, `circuits ${strands}s/${grav}g volume`).toBeGreaterThan(50);
+
+        const part = res.parts[0];
+        let minY = Infinity;
+        for (let i = 1; i < part.positions.length; i += 3) {
+          if (part.positions[i] < minY) minY = part.positions[i];
+        }
+        expect(minY, `circuits ${strands}s/${grav}g flat bed minY >= 0`).toBeGreaterThanOrEqual(-1e-4);
+      }
+    }
+
+    // Verify Z-up STL export minZ === 0 + Sculpt brush strokes + 2-Piece closed LED Kit 001 + AMS guide
+    const cfg = cloneConfig(OZEK_SIGNATURE_COLLECTION[1].config);
+    cfg.silhouette.buildMode = 'two_part';
     cfg.organic.mode = 'gravity';
+    cfg.organic.voronoiCells = 4;
     cfg.organic.gravityAccel = -9.8;
-    cfg.organic.gravityTwistDeg = 45;
-    cfg.organic.smoothPasses = 4;
     cfg.visual.colorMode = 'stripes';
     cfg.visual.stripeRepeats = 3;
     cfg.sculptStrokes = [
@@ -743,20 +781,133 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
       { u: 0.8, v: 0.4, radiusMm: 24, strength: 0.5, tool: 'carve' },
     ];
 
-    const resDown = generateLampGeometry(cfg, { draft: true, validateManifold: true });
-    expect(resDown.metrics.openEdges, 'sculpt + gravity -9.8 openEdges').toBe(0);
-    expect(resDown.metrics.nonManifoldEdges, 'sculpt + gravity -9.8 nonManifold').toBe(0);
-    expect(resDown.metrics.isWatertight, 'sculpt + gravity -9.8 watertight').toBe(true);
+    const resTwoPart = generateLampGeometry(cfg, { draft: true, validateManifold: true });
+    expect(resTwoPart.parts).toHaveLength(2);
+    expect(resTwoPart.metrics.openEdges, '2-part Voronoi + sculpt openEdges').toBe(0);
+    expect(resTwoPart.metrics.nonManifoldEdges, '2-part Voronoi + sculpt nonManifold').toBe(0);
+    expect(resTwoPart.metrics.isWatertight, '2-part Voronoi + sculpt watertight').toBe(true);
 
-    cfg.organic.gravityAccel = 9.8;
-    const resUp = generateLampGeometry(cfg, { draft: true, validateManifold: true });
-    expect(resUp.metrics.openEdges, 'sculpt + gravity +9.8 openEdges').toBe(0);
-    expect(resUp.metrics.nonManifoldEdges, 'sculpt + gravity +9.8 nonManifold').toBe(0);
-    expect(resUp.metrics.isWatertight, 'sculpt + gravity +9.8 watertight').toBe(true);
+    const shadePart = resTwoPart.parts.find((p) => p.role === 'shade')!;
+    const stl = exportPartToBinarySTL(shadePart);
+    const view = new DataView(stl);
+    const triCount = view.getUint32(80, true);
+    let minZ = Infinity;
+    for (let t = 0; t < triCount; t++) {
+      const off = 84 + t * 50;
+      for (let v = 0; v < 3; v++) {
+        const z = view.getFloat32(off + 12 + v * 12 + 8, true);
+        if (z < minZ) minZ = z;
+      }
+    }
+    expect(minZ, 'Voronoi shade STL minZ === 0').toBeCloseTo(0, 3);
 
-    const guide = generateBambuStudioGuide(cfg, resUp.metrics, ['ZEN_Base.stl', 'ZEN_Pantalla.stl']);
+    const guide = generateBambuStudioGuide(cfg, resTwoPart.metrics, [
+      'ZEN_Base.stl',
+      'ZEN_Pantalla.stl',
+    ]);
     expect(guide).toContain('COLORACIÓN MULTICOLOR BAMBU LAB AMS');
     expect(guide).toContain('PURGA MÍNIMA');
     expect(guide).toContain('Esfera Cerrada (R = 0 mm)');
+  }, 45000);
+
+  it('FIX-I — validates Organic Growth ("Crecimiento") dense carnation ruffled fins (24–48 fins, 18–28 mm deep, vEnd = 0.999 closed pole R = 0)', () => {
+    for (const finCount of [24, 32, 48]) {
+      const cfg = cloneConfig(OZEK_SIGNATURE_COLLECTION[1].config); // 1-Piece Closed Sphere LED Kit 001
+      cfg.organic.mode = 'growth';
+      cfg.organic.growthFinCount = finCount;
+      cfg.organic.growthAmp = finCount === 24 ? 0.5 : 0.88;
+      cfg.organic.growthFreq = finCount === 48 ? 3.2 : 2.4;
+      cfg.organic.finDepth = 22;
+      cfg.organic.finThickness = 1.4;
+
+      const res = generateLampGeometry(cfg, { draft: true, validateManifold: true });
+      expect(res.parts).toHaveLength(1);
+      expect(res.metrics.openEdges, `growth ${finCount}f openEdges`).toBe(0);
+      expect(res.metrics.nonManifoldEdges, `growth ${finCount}f nonManifold`).toBe(0);
+      expect(res.metrics.isWatertight, `growth ${finCount}f watertight`).toBe(true);
+      expect(res.metrics.volumeCm3, `growth ${finCount}f volume`).toBeGreaterThan(55);
+
+      const part = res.parts[0];
+      let minY = Infinity;
+      let maxY = -Infinity;
+      let hasPolarApex = false;
+      for (let i = 0; i < part.positions.length; i += 3) {
+        const x = part.positions[i];
+        const y = part.positions[i + 1];
+        const z = part.positions[i + 2];
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        if (y > cfg.silhouette.height - 1.5 && Math.hypot(x, z) < 0.05) {
+          hasPolarApex = true;
+        }
+      }
+      expect(minY, `growth ${finCount}f minY >= 0`).toBeGreaterThanOrEqual(-1e-4);
+      expect(hasPolarApex, `growth ${finCount}f closed pole R=0`).toBe(true);
+
+      if (finCount === 32) {
+        const stl = exportPartToBinarySTL(part);
+        const view = new DataView(stl);
+        const triCount = view.getUint32(80, true);
+        let minZ = Infinity;
+        for (let t = 0; t < triCount; t++) {
+          const off = 84 + t * 50;
+          for (let v = 0; v < 3; v++) {
+            const z = view.getFloat32(off + 12 + v * 12 + 8, true);
+            if (z < minZ) minZ = z;
+          }
+        }
+        expect(minZ, 'growth STL minZ === 0').toBeCloseTo(0, 3);
+      }
+    }
   }, 30000);
+
+  it('FIX-J — validates Organic Wind ("Viento") 45–75 thin fins across Brisa / Ráfagas / Remolino (Z >= 0, closed sphere R = 0)', () => {
+    for (const windType of ['breeze', 'gusts', 'vortex'] as const) {
+      const cfg = cloneConfig(OZEK_SIGNATURE_COLLECTION[1].config); // 1-Piece Closed Sphere LED Kit 001
+      cfg.organic.mode = 'wind';
+      cfg.organic.windType = windType;
+      cfg.organic.windFinCount = windType === 'vortex' ? 68 : 54;
+      cfg.organic.windDirectionDeg = windType === 'breeze' ? 35 : windType === 'gusts' ? 140 : 250;
+      cfg.organic.windIntensity = windType === 'vortex' ? 175 : 130;
+      cfg.organic.finDepth = 9;
+      cfg.organic.finThickness = 1.2;
+
+      const res = generateLampGeometry(cfg, { draft: true, validateManifold: true });
+      expect(res.parts).toHaveLength(1);
+      expect(res.metrics.openEdges, `wind ${windType} openEdges`).toBe(0);
+      expect(res.metrics.nonManifoldEdges, `wind ${windType} nonManifold`).toBe(0);
+      expect(res.metrics.isWatertight, `wind ${windType} watertight`).toBe(true);
+      expect(res.metrics.volumeCm3, `wind ${windType} volume`).toBeGreaterThan(55);
+
+      const part = res.parts[0];
+      let minY = Infinity;
+      let hasPolarApex = false;
+      for (let i = 0; i < part.positions.length; i += 3) {
+        const x = part.positions[i];
+        const y = part.positions[i + 1];
+        const z = part.positions[i + 2];
+        if (y < minY) minY = y;
+        if (y > cfg.silhouette.height - 1.5 && Math.hypot(x, z) < 0.05) {
+          hasPolarApex = true;
+        }
+      }
+      expect(minY, `wind ${windType} minY >= 0`).toBeGreaterThanOrEqual(-1e-4);
+      expect(hasPolarApex, `wind ${windType} closed pole R=0`).toBe(true);
+
+      if (windType === 'vortex') {
+        const stl = exportPartToBinarySTL(part);
+        const view = new DataView(stl);
+        const triCount = view.getUint32(80, true);
+        let minZ = Infinity;
+        for (let t = 0; t < triCount; t++) {
+          const off = 84 + t * 50;
+          for (let v = 0; v < 3; v++) {
+            const z = view.getFloat32(off + 12 + v * 12 + 8, true);
+            if (z < minZ) minZ = z;
+          }
+        }
+        expect(minZ, 'wind vortex STL minZ === 0').toBeCloseTo(0, 3);
+      }
+    }
+  }, 45000);
 });

@@ -436,9 +436,14 @@ export class LampScene {
         entry.role === 'diffuser' ? effIntensity * 1.25 : effIntensity;
       entry.uniforms.uShowOverhangs.value = visual.showOverhangs ? 1.0 : 0.0;
 
-      // Apply AMS multicolor preview uniforms strictly to the outer shade
+      // Apply AMS multicolor preview & per-strand circuit coloring strictly to the outer shade
       if (entry.role === 'shade') {
+        const showStrandColors =
+          config.family === 'organic' &&
+          config.organic.mode === 'gravity' &&
+          Boolean(config.organic.colorByStrand);
         entry.uniforms.uColorMode.value = colorModeNum;
+        entry.uniforms.uColorByStrand.value = showStrandColors ? 1.0 : 0.0;
         entry.uniforms.uAccentColor.value.set(accentHex);
         entry.uniforms.uThirdColor.value.set(thirdHex);
         entry.uniforms.uStripeRepeats.value = visual.stripeRepeats || 2;
@@ -447,6 +452,7 @@ export class LampScene {
         entry.uniforms.uShadeHeight.value = silhouette.height;
       } else {
         entry.uniforms.uColorMode.value = 0.0;
+        entry.uniforms.uColorByStrand.value = 0.0;
       }
 
       if (isTwoPart) {

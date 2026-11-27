@@ -29,6 +29,10 @@ import { SilhouetteCurveEditor } from './controls/SilhouetteCurveEditor';
 
 type PanelTab = 'shape' | 'pattern' | 'base' | 'material' | 'sculpt';
 
+function clampNum(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
+}
+
 interface RightPanelProps {
   config: LampConfig;
   defaultForFamily: LampConfig;
@@ -413,8 +417,8 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                   </div>
                   <div className={`text-[10.5px] ${mutedText}`}>
                     {config.mount.type === 'led_kit_001'
-                      ? 'Cúpula continua hasta R = 0 mm (LED Kit 001)'
-                      : 'Cúpula cerrada con respiro discreto Ø 16 mm (E26/E27)'}
+                      ? `Cúpula continua cerrada hasta R = 0 mm (${isTwoPart ? '2 Piezas' : '1 Pieza integrada'} · LED Kit 001)`
+                      : 'E26/E27 requiere respiro térmico superior: deja orificio discreto Ø 16 mm'}
                   </div>
                 </div>
                 <input
@@ -1219,18 +1223,63 @@ export const RightPanel: React.FC<RightPanelProps> = ({
 
         {tab === 'pattern' && config.family === 'organic' && (
           <>
-            <SegmentedControl
-              label="Arquitectura orgánica (Núcleo 1.2 mm + Aletas)"
-              value={config.organic.mode}
-              dark={isNight}
-              options={[
-                { value: 'flames', label: 'Flamas / Ondas' },
-                { value: 'gravity', label: 'Listones Flujo' },
-              ]}
-              onChange={(mode) => updateOrganic({ mode }, false)}
-            />
+            <div className="space-y-1.5">
+              <div
+                className={`text-[12.5px] font-medium tracking-[-0.01em] ${
+                  isNight ? 'text-zinc-200' : 'text-zinc-700'
+                }`}
+              >
+                Patrón orgánico (Núcleo 1.2 mm + Aletas)
+              </div>
+              <SegmentedControl
+                value={config.organic.mode}
+                dark={isNight}
+                options={[
+                  { value: 'flames', label: 'Flamas / Ondas' },
+                  { value: 'gravity', label: 'Gravedad' },
+                ]}
+                onChange={(mode) => {
+                  if (mode === 'gravity') {
+                    const depth = clampNum(config.organic.finDepth ?? 21, 18, 24);
+                    const thick = clampNum(config.organic.finThickness ?? 1.4, 1.3, 1.6);
+                    const strands = clampNum(config.organic.voronoiCells ?? 4, 2, 8);
+                    updateOrganic(
+                      { mode, finDepth: depth, depth, finThickness: thick, voronoiCells: strands },
+                      false
+                    );
+                  } else {
+                    const depth = clampNum(config.organic.finDepth ?? 14, 8, 22);
+                    const thick = clampNum(config.organic.finThickness ?? 1.5, 1.2, 2.2);
+                    updateOrganic({ mode, finDepth: depth, depth, finThickness: thick }, false);
+                  }
+                }}
+              />
+              <SegmentedControl
+                value={config.organic.mode}
+                dark={isNight}
+                options={[
+                  { value: 'growth', label: 'Crecimiento' },
+                  { value: 'wind', label: 'Viento' },
+                ]}
+                onChange={(mode) => {
+                  if (mode === 'wind') {
+                    const depth = clampNum(config.organic.finDepth ?? 9, 6, 12);
+                    const thick = clampNum(config.organic.finThickness ?? 1.2, 1.0, 1.4);
+                    updateOrganic({ mode, finDepth: depth, depth, finThickness: thick }, false);
+                  } else {
+                    const depth = clampNum(config.organic.finDepth ?? 22, 18, 28);
+                    const thick = clampNum(config.organic.finThickness ?? 1.4, 1.2, 2.0);
+                    const fins = clampNum(config.organic.growthFinCount ?? 32, 24, 48);
+                    updateOrganic(
+                      { mode, finDepth: depth, depth, finThickness: thick, growthFinCount: fins },
+                      false
+                    );
+                  }
+                }}
+              />
+            </div>
 
-            {config.organic.mode === 'flames' ? (
+            {config.organic.mode === 'flames' && (
               <>
                 <StudioSlider
                   label="Número de aletas sinuosas"
@@ -1255,71 +1304,108 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                   onCommit={onCommitGeometry}
                 />
               </>
-            ) : (
+            )}
+
+            {config.organic.mode === 'gravity' && (
               <>
                 <StudioSlider
-                  label="Gravedad física"
-                  value={config.organic.gravityAccel ?? -6.5}
-                  defaultValue={-6.5}
+                  label="Trazos / Hilos (Circuitos continuos)"
+                  value={clampNum(config.organic.voronoiCells ?? 4, 2, 8)}
+                  defaultValue={4}
+                  min={2}
+                  max={8}
+                  step={1}
+                  minLabel="2 (largos)"
+                  maxLabel="8 (múltiples)"
+                  dark={isNight}
+                  onChange={(voronoiCells) => updateOrganic({ voronoiCells }, true)}
+                  onCommit={onCommitGeometry}
+                />
+                <label
+                  className={`flex items-center justify-between gap-2 px-3 py-2 rounded-xl border cursor-pointer transition-colors ${
+                    config.organic.colorByStrand
+                      ? isNight
+                        ? 'bg-amber-500/12 border-amber-400/40'
+                        : 'bg-amber-50/80 border-amber-300/80'
+                      : isNight
+                        ? 'bg-zinc-800/40 border-zinc-700/60'
+                        : 'bg-zinc-900/[0.02] border-zinc-900/[0.08]'
+                  }`}
+                >
+                  <div>
+                    <div className="text-[12px] font-semibold">Colorear cada trazo</div>
+                    <div className={`text-[10.5px] ${mutedText}`}>
+                      Paleta OZEK por circuito en visor 3D
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(config.organic.colorByStrand)}
+                    onChange={(e) =>
+                      onChangeVisual((prev) => ({
+                        ...prev,
+                        organic: { ...prev.organic, colorByStrand: e.target.checked },
+                      }))
+                    }
+                    className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+                  />
+                </label>
+                <StudioSlider
+                  label="Suavidad"
+                  value={config.organic.voronoiSoftness ?? 0.8}
+                  defaultValue={0.8}
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  formatValue={(v) => (v < 0.35 ? 'Rígida' : v < 0.72 ? 'Media' : 'Blanda')}
+                  minLabel="Rígida"
+                  maxLabel="Blanda"
+                  dark={isNight}
+                  onChange={(voronoiSoftness) => updateOrganic({ voronoiSoftness }, true)}
+                  onCommit={onCommitGeometry}
+                />
+                <StudioSlider
+                  label="Gravedad"
+                  value={config.organic.gravityAccel ?? -7.8}
+                  defaultValue={-7.8}
                   min={-9.8}
                   max={9.8}
                   step={0.4}
-                  formatValue={(v) => `${v > 0 ? '+' : ''}${v.toFixed(1)} m/s²`}
-                  minLabel="Abajo (-9.8)"
-                  maxLabel="Arriba (+9.8)"
+                  formatValue={(v) => `${(v / 9.8) > 0 ? '+' : ''}${(v / 9.8).toFixed(2)} g`}
+                  minLabel="Abajo (-1.0)"
+                  maxLabel="Arriba (+1.0)"
                   dark={isNight}
                   onChange={(gravityAccel) => updateOrganic({ gravityAccel }, true)}
                   onCommit={onCommitGeometry}
                 />
                 <StudioSlider
-                  label="Elevación anti-voladizo (Lift)"
-                  value={config.organic.finLift ?? 0.4}
-                  defaultValue={0.4}
+                  label="Dispersión"
+                  value={config.organic.voronoiDispersion ?? 0.55}
+                  defaultValue={0.55}
                   min={0}
                   max={1}
                   step={0.05}
                   formatValue={(v) => `${Math.round(v * 100)}%`}
-                  minLabel="Perpendicular"
-                  maxLabel="Elevadas"
+                  minLabel="Agrupado"
+                  maxLabel="Disperso"
                   dark={isNight}
-                  onChange={(finLift) => updateOrganic({ finLift }, true)}
-                  onCommit={onCommitGeometry}
-                />
-                <StudioSlider
-                  label="Flujo / Dispersión (Warp)"
-                  value={config.organic.warp}
-                  defaultValue={defaultForFamily.organic.warp}
-                  min={0.0}
-                  max={1.6}
-                  step={0.05}
-                  dark={isNight}
-                  onChange={(warp) => updateOrganic({ warp }, true)}
+                  onChange={(voronoiDispersion) => updateOrganic({ voronoiDispersion }, true)}
                   onCommit={onCommitGeometry}
                 />
                 {isExpert && (
                   <>
                     <StudioSlider
-                      label="Densidad de lazos (isocurvas)"
-                      value={config.organic.bands}
-                      defaultValue={5}
-                      min={3}
-                      max={7}
-                      step={1}
+                      label="Elevación anti-voladizo (Lift)"
+                      value={config.organic.finLift ?? 0.25}
+                      defaultValue={0.25}
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      formatValue={(v) => `${Math.round(v * 100)}%`}
+                      minLabel="Perpendicular"
+                      maxLabel="Elevadas"
                       dark={isNight}
-                      onChange={(bands) => updateOrganic({ bands }, true)}
-                      onCommit={onCommitGeometry}
-                    />
-                    <StudioSlider
-                      label="Suavidad de listones"
-                      value={config.organic.smoothPasses ?? 3}
-                      defaultValue={3}
-                      min={1}
-                      max={5}
-                      step={1}
-                      minLabel="Rígida"
-                      maxLabel="Blanda"
-                      dark={isNight}
-                      onChange={(smoothPasses) => updateOrganic({ smoothPasses }, true)}
+                      onChange={(finLift) => updateOrganic({ finLift }, true)}
                       onCommit={onCommitGeometry}
                     />
                     <StudioSlider
@@ -1334,28 +1420,166 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                       onChange={(gravityTwistDeg) => updateOrganic({ gravityTwistDeg }, true)}
                       onCommit={onCommitGeometry}
                     />
-                    <StudioSlider
-                      label="Escala de ruido 3D"
-                      value={config.organic.scale}
-                      defaultValue={defaultForFamily.organic.scale}
-                      min={1.0}
-                      max={3.6}
-                      step={0.1}
-                      dark={isNight}
-                      onChange={(scale) => updateOrganic({ scale }, true)}
-                      onCommit={onCommitGeometry}
-                    />
                   </>
                 )}
               </>
             )}
 
+            {config.organic.mode === 'growth' && (
+              <>
+                <StudioSlider
+                  label="Crecimiento (Volantes)"
+                  value={Math.round(clampNum((config.organic.growthAmp ?? 0.72) * 100, 0, 100))}
+                  defaultValue={72}
+                  min={0}
+                  max={100}
+                  step={5}
+                  unit="%"
+                  minLabel="Rectas"
+                  maxLabel="Olanes extremos"
+                  dark={isNight}
+                  onChange={(pct) => updateOrganic({ growthAmp: pct / 100 }, true)}
+                  onCommit={onCommitGeometry}
+                />
+                <StudioSlider
+                  label="Densidad de aletas"
+                  value={clampNum(config.organic.growthFinCount ?? 32, 24, 48)}
+                  defaultValue={32}
+                  min={24}
+                  max={48}
+                  step={2}
+                  minLabel="24 (abiertas)"
+                  maxLabel="48 (muy tupidas)"
+                  dark={isNight}
+                  onChange={(growthFinCount) => updateOrganic({ growthFinCount }, true)}
+                  onCommit={onCommitGeometry}
+                />
+                <StudioSlider
+                  label="Frecuencia de volantes"
+                  value={clampNum(config.organic.growthFreq ?? 2.2, 1.0, 4.0)}
+                  defaultValue={2.2}
+                  min={1.0}
+                  max={4.0}
+                  step={0.2}
+                  formatValue={(v) => (v < 1.8 ? 'Amplios' : v < 3.0 ? 'Medios' : 'Finos')}
+                  minLabel="Amplios"
+                  maxLabel="Finos"
+                  dark={isNight}
+                  onChange={(growthFreq) => updateOrganic({ growthFreq }, true)}
+                  onCommit={onCommitGeometry}
+                />
+              </>
+            )}
+
+            {config.organic.mode === 'wind' && (
+              <>
+                <SegmentedControl
+                  label="Tipo de viento (Campo 3D)"
+                  value={config.organic.windType ?? 'vortex'}
+                  dark={isNight}
+                  options={[
+                    { value: 'breeze', label: 'Brisa' },
+                    { value: 'gusts', label: 'Ráfagas' },
+                    { value: 'vortex', label: 'Remolino' },
+                  ]}
+                  onChange={(windType) => updateOrganic({ windType }, false)}
+                />
+                <StudioSlider
+                  label="Dirección"
+                  value={clampNum(config.organic.windDirectionDeg ?? 45, 0, 360)}
+                  defaultValue={45}
+                  min={0}
+                  max={360}
+                  step={5}
+                  unit="°"
+                  minLabel="0°"
+                  maxLabel="360°"
+                  dark={isNight}
+                  onChange={(windDirectionDeg) => updateOrganic({ windDirectionDeg }, true)}
+                  onCommit={onCommitGeometry}
+                />
+                <StudioSlider
+                  label="Intensidad"
+                  value={clampNum(config.organic.windIntensity ?? 110, 0, 200)}
+                  defaultValue={110}
+                  min={0}
+                  max={200}
+                  step={5}
+                  unit="%"
+                  minLabel="0% (calma)"
+                  maxLabel="200% (fuerte)"
+                  dark={isNight}
+                  onChange={(windIntensity) => updateOrganic({ windIntensity }, true)}
+                  onCommit={onCommitGeometry}
+                />
+                <StudioSlider
+                  label="Densidad de aletas finas"
+                  value={clampNum(config.organic.windFinCount ?? 60, 45, 75)}
+                  defaultValue={60}
+                  min={45}
+                  max={75}
+                  step={1}
+                  minLabel="45"
+                  maxLabel="75"
+                  dark={isNight}
+                  onChange={(windFinCount) => updateOrganic({ windFinCount }, true)}
+                  onCommit={onCommitGeometry}
+                />
+              </>
+            )}
+
             <StudioSlider
-              label="Profundidad radial de aletas"
-              value={config.organic.finDepth ?? config.organic.depth}
-              defaultValue={14.0}
-              min={8.0}
-              max={22.0}
+              label={
+                config.organic.mode === 'gravity'
+                  ? 'Profundidad de cinta'
+                  : config.organic.mode === 'wind'
+                    ? 'Profundidad de aleta fina'
+                    : 'Profundidad de aleta'
+              }
+              value={clampNum(
+                config.organic.finDepth ?? config.organic.depth,
+                config.organic.mode === 'gravity'
+                  ? 18
+                  : config.organic.mode === 'growth'
+                    ? 18
+                    : config.organic.mode === 'wind'
+                      ? 6
+                      : 8,
+                config.organic.mode === 'wind'
+                  ? 12
+                  : config.organic.mode === 'growth'
+                    ? 28
+                    : config.organic.mode === 'gravity'
+                      ? 24
+                      : 22
+              )}
+              defaultValue={
+                config.organic.mode === 'gravity'
+                  ? 21.0
+                  : config.organic.mode === 'growth'
+                    ? 22.0
+                    : config.organic.mode === 'wind'
+                      ? 9.0
+                      : 14.0
+              }
+              min={
+                config.organic.mode === 'gravity'
+                  ? 18.0
+                  : config.organic.mode === 'growth'
+                    ? 18.0
+                    : config.organic.mode === 'wind'
+                      ? 6.0
+                      : 8.0
+              }
+              max={
+                config.organic.mode === 'wind'
+                  ? 12.0
+                  : config.organic.mode === 'growth'
+                    ? 28.0
+                    : config.organic.mode === 'gravity'
+                      ? 24.0
+                      : 22.0
+              }
               step={1.0}
               unit="mm"
               dark={isNight}
@@ -1363,11 +1587,45 @@ export const RightPanel: React.FC<RightPanelProps> = ({
               onCommit={onCommitGeometry}
             />
             <StudioSlider
-              label="Grosor de aletas finas"
-              value={config.organic.finThickness ?? 1.5}
-              defaultValue={1.5}
-              min={1.2}
-              max={2.2}
+              label={
+                config.organic.mode === 'gravity'
+                  ? 'Grosor de cinta'
+                  : config.organic.mode === 'wind'
+                    ? 'Grosor de aleta fina'
+                    : 'Grosor de aletas'
+              }
+              value={clampNum(
+                config.organic.finThickness ?? (config.organic.mode === 'wind' ? 1.2 : 1.4),
+                config.organic.mode === 'wind'
+                  ? 1.0
+                  : config.organic.mode === 'gravity'
+                    ? 1.3
+                    : 1.2,
+                config.organic.mode === 'wind'
+                  ? 1.4
+                  : config.organic.mode === 'gravity'
+                    ? 1.6
+                    : config.organic.mode === 'growth'
+                      ? 2.0
+                      : 2.2
+              )}
+              defaultValue={config.organic.mode === 'wind' ? 1.2 : 1.4}
+              min={
+                config.organic.mode === 'wind'
+                  ? 1.0
+                  : config.organic.mode === 'gravity'
+                    ? 1.3
+                    : 1.2
+              }
+              max={
+                config.organic.mode === 'wind'
+                  ? 1.4
+                  : config.organic.mode === 'gravity'
+                    ? 1.6
+                    : config.organic.mode === 'growth'
+                      ? 2.0
+                      : 2.2
+              }
               step={0.1}
               unit="mm"
               dark={isNight}

@@ -58,11 +58,20 @@ export function normalizeLampConfig(partial: LampConfig): LampConfig {
 
   const rawOrganicMode = partial.organic?.mode as string | undefined;
   const safeOrganicMode =
-    rawOrganicMode === 'flames' || rawOrganicMode === 'gravity'
+    rawOrganicMode === 'flames' ||
+    rawOrganicMode === 'gravity' ||
+    rawOrganicMode === 'growth' ||
+    rawOrganicMode === 'wind'
       ? rawOrganicMode
       : rawOrganicMode === 'ribbons' || rawOrganicMode === 'topo' || rawOrganicMode === 'sculpt'
         ? 'gravity'
         : 'flames';
+
+  const rawWindType = partial.organic?.windType as string | undefined;
+  const safeWindType =
+    rawWindType === 'breeze' || rawWindType === 'gusts' || rawWindType === 'vortex'
+      ? rawWindType
+      : 'vortex';
 
   return {
     ...cloneConfig(DEFAULT_CONFIG),
@@ -76,7 +85,12 @@ export function normalizeLampConfig(partial: LampConfig): LampConfig {
     louvers: { ...DEFAULT_CONFIG.louvers, ...(partial.louvers ?? {}) },
     origami: { ...DEFAULT_CONFIG.origami, ...(partial.origami ?? {}) },
     woven: { ...DEFAULT_CONFIG.woven, ...(partial.woven ?? {}), pattern: safeWovenPattern },
-    organic: { ...DEFAULT_CONFIG.organic, ...(partial.organic ?? {}), mode: safeOrganicMode },
+    organic: {
+      ...DEFAULT_CONFIG.organic,
+      ...(partial.organic ?? {}),
+      mode: safeOrganicMode,
+      windType: safeWindType,
+    },
     visual: { ...DEFAULT_CONFIG.visual, ...(partial.visual ?? {}) },
     sculptStrokes: Array.isArray(partial.sculptStrokes) ? [...partial.sculptStrokes] : [],
   };

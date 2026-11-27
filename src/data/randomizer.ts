@@ -180,13 +180,36 @@ export function shuffleLampConfig(current: LampConfig): LampConfig {
     }
     next.woven.fdmSmoothing = roundStep(randRange(0.25, 0.55), 0.05);
   } else {
-    next.organic.mode = pick(['flames', 'gravity'] as const);
+    const mode = pick(['flames', 'gravity', 'growth', 'wind'] as const);
+    next.organic.mode = mode;
     next.organic.finCount = roundStep(randRange(18, 30), 2);
     next.organic.flameWaves = randInt(2, 5);
-    next.organic.finDepth = roundStep(randRange(10, 18), 1);
+    next.organic.voronoiCells = randInt(3, 6);
+    next.organic.voronoiSoftness = roundStep(randRange(0.6, 0.95), 0.05);
+    next.organic.voronoiDispersion = roundStep(randRange(0.25, 0.85), 0.05);
+    next.organic.gravityAccel = roundStep(randRange(-9.8, 3.0), 0.4);
+    next.organic.growthAmp = roundStep(randRange(0.55, 0.95), 0.05);
+    next.organic.growthFinCount = roundStep(randRange(26, 44), 2);
+    next.organic.growthFreq = roundStep(randRange(1.6, 3.4), 0.2);
+    next.organic.windType = pick(['breeze', 'gusts', 'vortex'] as const);
+    next.organic.windFinCount = roundStep(randRange(48, 72), 2);
+    next.organic.windDirectionDeg = roundStep(randRange(0, 350), 10);
+    next.organic.windIntensity = roundStep(randRange(70, 170), 10);
+    if (mode === 'wind') {
+      next.organic.finDepth = roundStep(randRange(7, 11), 1);
+      next.organic.finThickness = roundStep(randRange(1.0, 1.4), 0.1);
+    } else if (mode === 'gravity') {
+      next.organic.finDepth = roundStep(randRange(18, 24), 1);
+      next.organic.finThickness = roundStep(randRange(1.3, 1.6), 0.1);
+    } else if (mode === 'growth') {
+      next.organic.finDepth = roundStep(randRange(18, 26), 1);
+      next.organic.finThickness = roundStep(randRange(1.2, 1.7), 0.1);
+    } else {
+      next.organic.finDepth = roundStep(randRange(12, 20), 1);
+      next.organic.finThickness = roundStep(randRange(1.2, 1.8), 0.1);
+    }
     next.organic.depth = next.organic.finDepth;
-    next.organic.finThickness = roundStep(randRange(1.3, 1.8), 0.1);
-    next.organic.finLift = roundStep(randRange(0.25, 0.65), 0.05);
+    next.organic.finLift = roundStep(randRange(0.15, 0.55), 0.05);
     next.organic.scale = roundStep(randRange(1.5, 2.6), 0.1);
     next.organic.warp = roundStep(randRange(0.6, 1.3), 0.05);
     next.organic.bands = randInt(3, 6);

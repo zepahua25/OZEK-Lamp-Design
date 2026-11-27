@@ -99,17 +99,23 @@ function buildZen02(): LampConfig {
   cfg.silhouette.topRadius = 44;
   cfg.silhouette.crossSectionType = 'circle';
   cfg.silhouette.skirtWaveAmp = 0;
-  cfg.silhouette.closeTopDome = true; // Real closed sphere (R = 0 mm with LED Kit 001)!
+  cfg.silhouette.closeTopDome = true; // Real closed mathematical sphere to R = 0 mm!
   cfg.silhouette.includeDiffuser = false;
-  cfg.silhouette.buildMode = 'two_part';
+  // Integrated 1-Piece Sphere with Bambu LED Kit 001 flush in the flat bottom cut (zero extra pedestal!)
+  cfg.silhouette.buildMode = 'monoblock';
 
-  cfg.organic.mode = 'flames';
+  cfg.organic.mode = 'gravity';
+  cfg.organic.voronoiCells = 4;
+  cfg.organic.voronoiSoftness = 0.8;
+  cfg.organic.voronoiDispersion = 0.5;
+  cfg.organic.colorByStrand = true;
+  cfg.organic.gravityAccel = -7.8;
   cfg.organic.finCount = 24;
   cfg.organic.flameWaves = 3;
-  cfg.organic.finDepth = 14.0;
-  cfg.organic.depth = 14.0;
-  cfg.organic.finThickness = 1.5;
-  cfg.organic.finLift = 0.35;
+  cfg.organic.finDepth = 21.0;
+  cfg.organic.depth = 21.0;
+  cfg.organic.finThickness = 1.4;
+  cfg.organic.finLift = 0.2;
 
   cfg.base.style = 'cylinder';
   cfg.base.finish = 'smooth';
@@ -126,7 +132,7 @@ function buildZen02(): LampConfig {
   cfg.visual.baseMaterial = 'ozek_onyx';
   cfg.visual.colorMode = 'solid';
   cfg.visual.lightOn = true;
-  cfg.visual.lightIntensity = 1.55;
+  cfg.visual.lightIntensity = 1.6;
   cfg.visual.lightWarmth = 2650;
   cfg.sculptStrokes = [];
   return cfg;
@@ -234,8 +240,8 @@ export const OZEK_SIGNATURE_COLLECTION: OzekSignaturePiece[] = [
     id: 'zen-02',
     code: 'ZEN 02',
     title: 'Equilibrio',
-    subtitle: 'Esfera Cerrada Orgánica Flamas Arena + Base Ónice ☰',
-    badge: 'Esfera R=0 · LED 001',
+    subtitle: 'Esfera Integrada 1 Pieza · Celdas Voronoi 3D + LED 001',
+    badge: '1 Pieza · Esfera R=0',
     swatches: ['#F5F2EB', '#252525'],
     config: buildZen02(),
   },

@@ -221,6 +221,8 @@ export interface LampShaderUniforms {
   uShowOverhangs: { value: number };
   /** 0 = solid, 1 = AMS Z-stripes, 2 = edges/crests, 3 = alternating strands */
   uColorMode: { value: number };
+  /** 1 = color each Gravity Differential Curve Growth circuit with a distinct OZEK palette tone */
+  uColorByStrand: { value: number };
   uAccentColor: { value: THREE.Color };
   uThirdColor: { value: THREE.Color };
   uStripeRepeats: { value: number };
@@ -255,6 +257,7 @@ export function createBacklitLampMaterial(
     uGlowTint: { value: new THREE.Color(spec.glowTint) },
     uShowOverhangs: { value: 0.0 },
     uColorMode: { value: 0.0 },
+    uColorByStrand: { value: 0.0 },
     uAccentColor: { value: new THREE.Color('#C87D55') },
     uThirdColor: { value: new THREE.Color('#252525') },
     uStripeRepeats: { value: 2.0 },
@@ -312,6 +315,7 @@ export function createBacklitLampMaterial(
         uniform vec3 uGlowTint;
         uniform float uShowOverhangs;
         uniform float uColorMode;
+        uniform float uColorByStrand;
         uniform vec3 uAccentColor;
         uniform vec3 uThirdColor;
         uniform float uStripeRepeats;
@@ -326,7 +330,28 @@ export function createBacklitLampMaterial(
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
-        if (uColorMode > 0.5) {
+        float realThick = vThickness >= 50.0 ? mod(vThickness, 100.0) : vThickness;
+        if (uColorByStrand > 0.5 && vThickness >= 50.0) {
+          // Linear-space OZEK studio palette per continuous Gravity circuit
+          float sId = mod(floor(vThickness / 100.0 + 0.05) - 1.0, 8.0);
+          if (sId < 0.5) {
+            diffuseColor.rgb = vec3(0.578, 0.205, 0.091); // Cobre / Bronce OZEK (#C87D55 linear)
+          } else if (sId < 1.5) {
+            diffuseColor.rgb = vec3(0.913, 0.888, 0.831); // Arena Natural OZEK (#F5F2EB linear)
+          } else if (sId < 2.5) {
+            diffuseColor.rgb = vec3(0.020, 0.020, 0.022); // Gris Ónice OZEK (#252525 linear)
+          } else if (sId < 3.5) {
+            diffuseColor.rgb = vec3(0.479, 0.093, 0.042); // Terracota / Arcilla (#B8563A linear)
+          } else if (sId < 4.5) {
+            diffuseColor.rgb = vec3(0.205, 0.328, 0.262); // Salvia / Menta (#7D9B8C linear)
+          } else if (sId < 5.5) {
+            diffuseColor.rgb = vec3(0.687, 0.332, 0.054); // Ámbar Dorado (#D89C42 linear)
+          } else if (sId < 6.5) {
+            diffuseColor.rgb = vec3(0.386, 0.347, 0.296); // Piedra Cálida (#A79F94 linear)
+          } else {
+            diffuseColor.rgb = vec3(0.270, 0.018, 0.040); // Borgoña Profundo (#8E2438 linear)
+          }
+        } else if (uColorMode > 0.5) {
           float vNorm = clamp((vWorldPos.y - uShadeMinY) / max(uShadeHeight, 1.0), 0.0, 1.0);
           if (uColorMode < 1.5) {
             // Mode 1: AMS Z-Stripes (crisp horizontal height-band color swaps)
@@ -338,7 +363,7 @@ export function createBacklitLampMaterial(
             }
           } else if (uColorMode < 2.5) {
             // Mode 2: Edges / Crests (accent color highlights thicker crests & extruded fin tips)
-            float edgeMask = smoothstep(uEdgeDepthMm - 0.35, uEdgeDepthMm + 0.45, vThickness);
+            float edgeMask = smoothstep(uEdgeDepthMm - 0.35, uEdgeDepthMm + 0.45, realThick);
             diffuseColor.rgb = mix(diffuseColor.rgb, uAccentColor, edgeMask);
           } else {
             // Mode 3: Strands / Alternating (3-color angular/helical strand mapping)
@@ -362,9 +387,10 @@ export function createBacklitLampMaterial(
         // Exponential Beer-Lambert attenuation through real local wall thickness (mm)
         // Thin 0.65 mm RippleMesh/Grid cell windows & 1.2 mm Organic diffuser cores glow brilliantly warm,
         // while thick 3.5–6.5 mm arches & extruded fins stay crisp & sculpted!
-        float thickAtten = exp(-max(vThickness, 0.6) * (uAbsorption * 1.42));
-        float thinWindowBoost = pow(smoothstep(1.65, 0.62, vThickness), 1.45) * 1.38;
-        float coreBoost = smoothstep(2.1, 1.05, vThickness) * 0.35;
+        float effThick = vThickness >= 50.0 ? mod(vThickness, 100.0) : vThickness;
+        float thickAtten = exp(-max(effThick, 0.6) * (uAbsorption * 1.42));
+        float thinWindowBoost = pow(smoothstep(1.65, 0.62, effThick), 1.45) * 1.38;
+        float coreBoost = smoothstep(2.1, 1.05, effThick) * 0.35;
         // Smooth radial distance falloff calibrated in millimeters
         float distAtten = 1.0 / (1.0 + 0.00016 * distMm * distMm);
 
@@ -392,7 +418,7 @@ export function createBacklitLampMaterial(
       );
   };
 
-  material.customProgramCacheKey = () => 'ozek-backlit-lamp-v3-ams';
+  material.customProgramCacheKey = () => 'ozek-backlit-lamp-v4-strands';
 
   return { material, uniforms };
 }
