@@ -13,7 +13,7 @@ import {
 } from './materials';
 
 interface ScenePartEntry {
-  role: 'shade' | 'base' | 'diffuser';
+  role: 'shade' | 'base' | 'cup' | 'diffuser';
   mesh: THREE.Mesh;
   material: THREE.MeshPhysicalMaterial;
   uniforms: LampShaderUniforms;
@@ -254,7 +254,7 @@ export class LampScene {
   public updateMeshes(partDataList: MeshPartData[], config: LampConfig): void {
     this.lastConfig = config;
 
-    const prevOffsets = new Map<'shade' | 'base' | 'diffuser', number>();
+    const prevOffsets = new Map<'shade' | 'base' | 'cup' | 'diffuser', number>();
     for (const entry of this.parts) {
       prevOffsets.set(entry.role, entry.mesh.position.y);
       this.lampGroup.remove(entry.mesh);
@@ -264,6 +264,8 @@ export class LampScene {
     this.parts = [];
 
     const activeClip = this.sectionCutEnabled ? [this.clipPlane] : [];
+    const isMultiPart =
+      config.silhouette.buildMode === 'two_part' || config.silhouette.buildMode === 'three_part';
 
     for (const part of partDataList) {
       const geom = new THREE.BufferGeometry();
@@ -276,10 +278,10 @@ export class LampScene {
 
       const presetId =
         part.role === 'diffuser'
-          ? 'pla_white'
-          : part.role === 'base' && config.silhouette.buildMode === 'two_part'
+          ? 'ozek_sand'
+          : part.role === 'base' && isMultiPart
             ? config.visual.baseMaterial
-            : config.visual.material;
+            : config.visual.material; // Both 'shade' and 'cup' share the Shade color (e.g. Arena)!
 
       const useFlatShading = part.role === 'shade' && config.family === 'origami';
       const { material, uniforms } = createBacklitLampMaterial(
@@ -312,7 +314,10 @@ export class LampScene {
     this.lastConfig = config;
     const { visual, silhouette, base, mount } = config;
     const isNight = visual.sceneTheme === 'warm_night';
-    const isTwoPart = silhouette.buildMode === 'two_part' && mount.position === 'bottom';
+    const isTwoPart =
+      (silhouette.buildMode === 'two_part' || silhouette.buildMode === 'three_part') &&
+      mount.position === 'bottom';
+    const isThreePart = silhouette.buildMode === 'three_part' && mount.position === 'bottom';
     const seatY = isTwoPart ? getShadeSeatY(config) : 0;
 
     if (isNight) {
@@ -368,18 +373,22 @@ export class LampScene {
 
     const assembly = visual.assemblyView;
     const hasDiffuser = isTwoPart && silhouette.includeDiffuser;
-    // Stepped exploded view: Base (0 mm) -> Diffuser (+34 mm) -> Outer Shade (+82 mm, or +50 mm without diffuser)
+    const hasMiddlePart = hasDiffuser || isThreePart;
+    // Stepped exploded view: Base (0 mm) -> Copa / Diffuser (+34 mm) -> Outer Shade (+84 mm, or +50 mm without middle part)
     const shadeExplodeY =
       isTwoPart && assembly === 'exploded'
-        ? hasDiffuser
-          ? 82
+        ? hasMiddlePart
+          ? 84
           : 50
         : isTwoPart && assembly === 'shade_only'
           ? -seatY
           : 0;
+    const cupExplodeY = isThreePart && assembly === 'exploded' ? 32 : 0;
     const diffuserExplodeY =
       isTwoPart && assembly === 'exploded'
-        ? 34
+        ? isThreePart
+          ? 56
+          : 34
         : isTwoPart && assembly === 'shade_only'
           ? -seatY
           : 0;
@@ -473,6 +482,9 @@ export class LampScene {
         if (entry.role === 'base') {
           entry.mesh.visible = assembly !== 'shade_only';
           entry.targetOffsetY = 0;
+        } else if (entry.role === 'cup') {
+          entry.mesh.visible = assembly !== 'base_only' && assembly !== 'shade_only';
+          entry.targetOffsetY = cupExplodeY;
         } else if (entry.role === 'diffuser') {
           entry.mesh.visible = assembly !== 'base_only';
           entry.targetOffsetY = diffuserExplodeY;

@@ -10,6 +10,13 @@ import {
   SLENDER_E26_RING_HEIGHT_MM,
   SLENDER_E26_SOCKET_OUTER_RADIUS_MM,
   THREAD_DEPTH_MM,
+  THREE_PART_CUP_BASE_OUTER_RADIUS_MM,
+  THREE_PART_CUP_BORE_RADIUS_MM,
+  THREE_PART_CUP_FLARE_HEIGHT_MM,
+  THREE_PART_STEM_INNER_RADIUS_MM,
+  THREE_PART_STEM_OUTER_RADIUS_MM,
+  THREE_PART_TENON_HEIGHT_MM,
+  THREE_PART_TENON_OUTER_RADIUS_MM,
   couplingUsesBayonet,
   evaluateMaleCouplingOffset,
   getCouplingHeightMm,
@@ -17,6 +24,8 @@ import {
   getEffectiveDomeStemHeightMm,
   getEffectiveNeckRadius,
   getShadeSeatY,
+  getThreePartCupSeatY,
+  isThreePartCupMode,
 } from './coupling';
 import { getLedKit001Dimensions } from './mounts/ledKit001';
 import { getSocketE26Dimensions } from './mounts/socketE26';
@@ -934,22 +943,29 @@ export function buildIndependentBase(
     return mb;
   }
 
-  // --- STYLE 1: DOME (with optional Slender E26/E27 Stem "palito" Ø 17 mm + 45° flare to Ø 46 / Ø 40.5 mm socket ring!) ---
+  // --- STYLE 1: DOME (supports 2-Piece Slender E26 Stem OR 3-Piece Base Ø15 mm Stem + Tenon!) ---
   if (base.style === 'dome') {
     const domeH = Math.max(36, base.height);
     const stemH = getEffectiveDomeStemHeightMm(config);
     const flareH = getDomeStemFlareHeightMm(config);
+    const isThreePart = isThreePartCupMode(config) && !isLed;
     const hasStem = stemH > 0.1 && !isLed;
     const stemTopY = domeH + stemH;
     const ringBotY = stemTopY + flareH;
-    const fullTopY = hasStem ? ringBotY + SLENDER_E26_RING_HEIGHT_MM : domeH + couplingH;
+    const fullTopY = isThreePart
+      ? stemTopY + THREE_PART_TENON_HEIGHT_MM
+      : hasStem
+        ? ringBotY + SLENDER_E26_RING_HEIGHT_MM
+        : domeH + couplingH;
     const maxClipY = clipHeightMm ? Math.min(fullTopY, clipHeightMm) : fullTopY;
 
+    const rStemOut = isThreePart ? THREE_PART_STEM_OUTER_RADIUS_MM : DOME_STEM_OUTER_RADIUS_MM;
+    const rStemIn = isThreePart ? THREE_PART_STEM_INNER_RADIUS_MM : DOME_STEM_INNER_RADIUS_MM;
     const rFoot = Math.max(rNeck + 10, base.footRadius);
     const rShoulder = hasStem
       ? SLENDER_E26_SOCKET_OUTER_RADIUS_MM
       : rNeck + (base.coupling === 'gravity_seat' ? 4.5 : 4.0);
-    const rDomeCrown = hasStem ? DOME_STEM_OUTER_RADIUS_MM + 1.0 : rShoulder;
+    const rDomeCrown = hasStem ? rStemOut + 1.0 : rShoulder;
 
     const domeRAt = (y: number): number => {
       const t = clamp(y / domeH, 0, 1);
@@ -1006,19 +1022,29 @@ export function buildIndependentBase(
       domeH
     );
 
-    if (hasStem) {
+    if (isThreePart) {
+      // Piece 1 (Base Ónice): Ultra-slender Ø 15.0 mm stem + stepped Ø 13.0 × 8.0 mm cylindrical spigot (NO dark funnel!)
+      outer.push({ y: domeH + 1.2, r: rStemOut });
+      outer.push({ y: stemTopY, r: rStemOut });
+      outer.push({ y: stemTopY + 0.35, r: THREE_PART_TENON_OUTER_RADIUS_MM });
+      const tenonTopY = Math.min(maxClipY, stemTopY + THREE_PART_TENON_HEIGHT_MM);
+      if (tenonTopY > stemTopY + 1.2) {
+        outer.push({ y: tenonTopY - 0.6, r: THREE_PART_TENON_OUTER_RADIUS_MM });
+        outer.push({ y: tenonTopY, r: THREE_PART_TENON_OUTER_RADIUS_MM - 0.5 });
+      } else {
+        outer.push({ y: tenonTopY, r: THREE_PART_TENON_OUTER_RADIUS_MM });
+      }
+    } else if (hasStem) {
       // Smooth dome crown transition into slender Ø 17.0 mm tube (16 mm tall), then 45° self-supporting flare
       // strictly up to the compact Ø 46.0 mm E26/E27 socket ring (NO wide bayonet collar on top!).
-      outer.push({ y: domeH + 1.2, r: DOME_STEM_OUTER_RADIUS_MM });
-      outer.push({ y: stemTopY, r: DOME_STEM_OUTER_RADIUS_MM });
+      outer.push({ y: domeH + 1.2, r: rStemOut });
+      outer.push({ y: stemTopY, r: rStemOut });
       const flareSegs = 4;
       for (let i = 1; i <= flareSegs; i++) {
         const frac = i / flareSegs;
         outer.push({
           y: stemTopY + flareH * frac,
-          r:
-            DOME_STEM_OUTER_RADIUS_MM +
-            (SLENDER_E26_SOCKET_OUTER_RADIUS_MM - DOME_STEM_OUTER_RADIUS_MM) * frac,
+          r: rStemOut + (SLENDER_E26_SOCKET_OUTER_RADIUS_MM - rStemOut) * frac,
         });
       }
       if (maxClipY > ringBotY + 0.2) {
@@ -1041,9 +1067,28 @@ export function buildIndependentBase(
         true,
         0
       );
+    } else if (isThreePart) {
+      // Continuous Ø 8.5 mm cable bore down through spigot & Ø 15 mm stem -> 45° self-supporting dome vault!
+      inner.push({ y: maxClipY, r: rStemIn });
+      inner.push({ y: domeH, r: rStemIn });
+      const rBotCav = Math.max(e26.holeRadiusMm + 6.0, rFoot - 4.8);
+      const vaultSegs = 6;
+      const totalVaultDrop = Math.min(domeH - gableClearY, Math.max(6, rBotCav - rStemIn));
+      for (let i = 1; i <= vaultSegs; i++) {
+        const frac = i / vaultSegs;
+        const y = domeH - totalVaultDrop * frac;
+        const r45 = rStemIn + (domeH - y);
+        const rWallBound = Math.max(rStemIn + 2.5, domeRAt(y) - 4.2);
+        inner.push({ y, r: Math.min(r45, rWallBound, rBotCav) });
+      }
+      const rLowest = Math.min(rBotCav, rStemIn + (domeH - gableClearY));
+      if (domeH - totalVaultDrop > gableClearY + 1.0) {
+        inner.push({ y: gableClearY, r: rLowest });
+      }
+      inner.push({ y: slotH, r: rLowest });
+      inner.push({ y: 0, r: rLowest });
     } else if (hasStem) {
       // Compact Ø 46.0 / Ø 40.5 mm E26/E27 socket ring -> 45° upward-facing cable funnel -> Ø 9.0 mm hollow stem -> 45° dome vault!
-      const rStemIn = DOME_STEM_INNER_RADIUS_MM;
       const rFunnelTop = Math.min(e26.holeRadiusMm - 1.5, SLENDER_E26_SOCKET_OUTER_RADIUS_MM - 6.0); // 17.0 mm (4.0 mm wall!)
       const yFunnelTop = Math.max(stemTopY + 1.0, ringBotY - 2.0);
       inner.push({ y: maxClipY, r: e26.holeRadiusMm });
@@ -1136,17 +1181,22 @@ export function buildIndependentBase(
     );
 
     if (isLed) {
-      const fullTopY = flangeH + couplingH;
+      // Respect user-configurable base.height on Conkel + LED Kit 001!
+      const fullTopY = Math.max(flangeH + couplingH, base.height);
+      const effFlangeH = Math.max(flangeH, fullTopY - couplingH);
       const maxClipY = clipHeightMm ? Math.min(fullTopY, clipHeightMm) : fullTopY;
 
       const outer: ProfileNode[] = [
         { y: 0, r: rFoot },
         { y: slotH, r: rFoot },
-        { y: Math.min(flangeH - 0.8, maxClipY), r: rFoot },
-        { y: Math.min(flangeH, maxClipY), r: rFoot - 0.8 },
       ];
-      if (maxClipY > flangeH + 0.5) {
-        appendMaleCouplingNodes(outer, flangeH, maxClipY);
+      if (effFlangeH > gableClearY + 1.2 && maxClipY > gableClearY + 1.0) {
+        outer.push({ y: gableClearY, r: rFoot });
+      }
+      outer.push({ y: Math.min(effFlangeH - 0.8, maxClipY), r: rFoot });
+      outer.push({ y: Math.min(effFlangeH, maxClipY), r: rFoot - 0.8 });
+      if (maxClipY > effFlangeH + 0.5) {
+        appendMaleCouplingNodes(outer, effFlangeH, maxClipY);
       }
 
       const inner: ProfileNode[] = [];
@@ -1154,25 +1204,41 @@ export function buildIndependentBase(
         inner,
         led,
         maxClipY,
-        (y) => (y >= flangeH - 1.0 ? led.cavityRadiusMm : Math.max(led.cavityRadiusMm, rFoot - 4.5)),
+        (y) =>
+          y >= effFlangeH - 1.0 ? led.cavityRadiusMm : Math.max(led.cavityRadiusMm, rFoot - 4.5),
         slotH,
         gableClearY,
         true,
         0
       );
 
-      const conkelLedSeal: AuthorSealSpec | null =
-        wantAuthorSeal && maxClipY >= flangeH + 9.2
-          ? {
-              // Seated cleanly on rear collar at 180° (clear of cord slot & bayonet lugs)
-              centerTheta: couplingUsesBayonet(base) ? Math.PI / 3 : Math.PI,
-              yCenter: flangeH + couplingH * 0.5,
-              widthMm: 9.6,
-              heightMm: Math.min(9.0, couplingH - 1.4),
-              depthMm: OZEK_HANKO_SEAL_DEPTH_MM,
-              refRadiusMm: rNeck,
-            }
-          : null;
+      const bodyAvailH = Math.min(effFlangeH, maxClipY) - 1.2 - gableClearY - 2.0;
+      let conkelLedSeal: AuthorSealSpec | null = null;
+      if (wantAuthorSeal && bodyAvailH >= 9.5) {
+        const sealH = clamp(bodyAvailH, 9.5, 12.5);
+        const sealY = Math.min(
+          effFlangeH - 1.2 - sealH * 0.5 - 0.8,
+          gableClearY + 1.5 + sealH * 0.5
+        );
+        conkelLedSeal = {
+          centerTheta: 0,
+          yCenter: sealY,
+          widthMm: Math.min(11.2, sealH * 0.88),
+          heightMm: sealH,
+          depthMm: OZEK_HANKO_SEAL_DEPTH_MM,
+          refRadiusMm: rFoot,
+        };
+      } else if (wantAuthorSeal && maxClipY >= effFlangeH + 9.2) {
+        conkelLedSeal = {
+          // Seated cleanly on rear collar (clear of cord slot & bayonet lugs)
+          centerTheta: couplingUsesBayonet(base) ? Math.PI / 3 : Math.PI,
+          yCenter: effFlangeH + couplingH * 0.5,
+          widthMm: 9.6,
+          heightMm: Math.min(9.0, couplingH - 1.4),
+          depthMm: OZEK_HANKO_SEAL_DEPTH_MM,
+          refRadiusMm: rNeck,
+        };
+      }
 
       buildClosedRevolutionWithOptionalCordSlot(
         mb,
@@ -1376,19 +1442,23 @@ export function buildIndependentBase(
     return mb;
   }
 
-  // --- STYLE 4: CYLINDER ---
+  // --- STYLE 4: CYLINDER (supports low 18 mm up to 110 mm heights!) ---
   if (base.style === 'cylinder') {
-    const drumH = Math.max(26, base.height);
+    const drumH = Math.max(18, base.height);
     const revealH = Math.max(0, base.collarRevealMm);
     const fullTopY = drumH + revealH + couplingH;
     const maxClipY = clipHeightMm ? Math.min(fullTopY, clipHeightMm) : fullTopY;
 
     const rDrum = Math.max(rNeck + 10, base.footRadius);
+    const isLowDrum = drumH < 22.5;
+    const cylSlotW = isLowDrum ? 5.5 : slotW;
+    const cylSlotH = isLowDrum ? 3.5 : slotH;
+    const cylGableClearY = isLowDrum ? 6.8 : gableClearY;
 
     if (clipHeightMm && clipHeightMm < drumH - 5) {
       const outer: ProfileNode[] = [
         { y: 0, r: rDrum },
-        { y: slotH, r: rDrum },
+        { y: cylSlotH, r: rDrum },
         { y: maxClipY, r: rDrum },
       ];
       const rIn = isLed ? led.cavityRadiusMm : Math.max(e26.holeRadiusMm + 6, rDrum - 5.5);
@@ -1399,38 +1469,38 @@ export function buildIndependentBase(
           led,
           maxClipY,
           () => Math.max(led.cavityRadiusMm, rDrum - 4.5),
-          slotH,
-          gableClearY,
+          cylSlotH,
+          cylGableClearY,
           true,
           0
         );
       } else {
-        const cBot = Math.max(gableClearY, maxClipY - e26CeilingThick);
+        const cBot = Math.max(cylGableClearY, maxClipY - e26CeilingThick);
         inner.push({ y: maxClipY, r: e26.holeRadiusMm });
         inner.push({ y: cBot, r: e26.holeRadiusMm });
-        appendE26Vault45(inner, cBot, e26.holeRadiusMm, rIn, slotH + 1);
-        inner.push({ y: slotH, r: rIn });
+        appendE26Vault45(inner, cBot, e26.holeRadiusMm, rIn, cylSlotH + 1);
+        inner.push({ y: cylSlotH, r: rIn });
         inner.push({ y: 0, r: rIn });
       }
       buildClosedRevolutionWithOptionalCordSlot(mb, N, outer, inner, {
-        widthMm: slotW,
-        heightMm: slotH,
+        widthMm: cylSlotW,
+        heightMm: cylSlotH,
       });
       return mb;
     }
 
     const outer: ProfileNode[] = [
       { y: 0, r: rDrum },
-      makeRibbedNode(slotH, rDrum, slotH, drumH),
+      makeRibbedNode(cylSlotH, rDrum, cylSlotH, drumH),
     ];
     const bodySegs = isRibbed ? 6 : 2;
     appendBodyProfileWithOptionalGrooves(
       outer,
-      gableClearY,
+      cylGableClearY,
       drumH - 1.2,
       bodySegs,
       () => rDrum,
-      slotH,
+      cylSlotH,
       drumH
     );
     outer.push({ y: drumH, r: rDrum - 1.2 });
@@ -1450,8 +1520,8 @@ export function buildIndependentBase(
         led,
         maxClipY,
         (y) => (y >= drumH ? led.cavityRadiusMm : Math.max(led.cavityRadiusMm, rDrum - 4.5)),
-        slotH,
-        gableClearY,
+        cylSlotH,
+        cylGableClearY,
         true,
         0
       );
@@ -1460,40 +1530,41 @@ export function buildIndependentBase(
       inner.push({ y: maxClipY, r: Math.max(e26.holeRadiusMm + 1.5, rNeck - 3.2) });
       inner.push({ y: topDeckY, r: e26.holeRadiusMm });
       inner.push({ y: cBot, r: e26.holeRadiusMm });
-      const vBot = appendE26Vault45(inner, cBot, e26.holeRadiusMm, rDrumCav, gableClearY + 1);
+      const vBot = appendE26Vault45(inner, cBot, e26.holeRadiusMm, rDrumCav, cylGableClearY + 1);
       const rSafeCav = Math.min(rDrumCav, e26.holeRadiusMm + (cBot - vBot));
-      if (vBot > gableClearY + 1) {
-        inner.push({ y: gableClearY, r: rSafeCav });
+      if (vBot > cylGableClearY + 1) {
+        inner.push({ y: cylGableClearY, r: rSafeCav });
       }
-      inner.push({ y: slotH, r: rSafeCav });
+      inner.push({ y: cylSlotH, r: rSafeCav });
       inner.push({ y: 0, r: rSafeCav });
     }
 
-    // Place rear Hanko Z☰ sign right above the cable arch (gableClearY + 1.5 mm margin)
-    const cylAvailH = drumH - 1.4 - gableClearY - 2.5;
-    const cylSealH = clamp(cylAvailH, 9.5, 12.5);
-    const cylSealY = Math.min(
-      drumH - 1.4 - cylSealH * 0.5 - 1.0,
-      gableClearY + 1.5 + cylSealH * 0.5
-    );
-    const cylSeal: AuthorSealSpec | null =
-      wantAuthorSeal && cylAvailH >= 9.5
-        ? {
-            centerTheta: 0,
-            yCenter: cylSealY,
-            widthMm: Math.min(11.2, cylSealH * 0.88),
-            heightMm: cylSealH,
-            depthMm: OZEK_HANKO_SEAL_DEPTH_MM,
-            refRadiusMm: rDrum,
-          }
-        : null;
+    // Place rear Hanko Z☰ sign right above the cable arch (even on low 18 mm cylinder!)
+    const cylAvailH = drumH - 1.4 - cylGableClearY - (isLowDrum ? 1.0 : 2.5);
+    let cylSeal: AuthorSealSpec | null = null;
+    if (wantAuthorSeal && cylAvailH >= 8.5) {
+      const cylSealH = isLowDrum ? clamp(cylAvailH, 8.5, 9.2) : clamp(cylAvailH, 9.5, 12.5);
+      const marginBot = isLowDrum ? 0.65 : 1.5;
+      const cylSealY = Math.min(
+        drumH - 1.4 - cylSealH * 0.5 - 0.6,
+        cylGableClearY + marginBot + cylSealH * 0.5
+      );
+      cylSeal = {
+        centerTheta: 0,
+        yCenter: cylSealY,
+        widthMm: Math.min(11.2, cylSealH * (isLowDrum ? 1.05 : 0.88)),
+        heightMm: cylSealH,
+        depthMm: OZEK_HANKO_SEAL_DEPTH_MM,
+        refRadiusMm: rDrum,
+      };
+    }
 
     buildClosedRevolutionWithOptionalCordSlot(
       mb,
       N,
       outer,
       inner,
-      { widthMm: slotW, heightMm: slotH },
+      { widthMm: cylSlotW, heightMm: cylSlotH },
       cylSeal,
       draft
     );
@@ -1579,5 +1650,52 @@ export function buildIndependentBase(
     );
   }
 
+  return mb;
+}
+
+/**
+ * Builds Piece 2 ("Copa porta-socket E26/E27", Arena / Shade color) for 3-Piece OMOI 01 mode!
+ *  - Slip-fits cleanly onto Piece 1's Ø 13.0 × 8.0 mm top spigot (Ø 13.5 mm inner bore, +0.25 mm radial PLA clearance)
+ *  - Flares outward at 45° (14.0 mm) strictly to the compact E26/E27 socket ring (Ø 46.0 mm outer / Ø 40.5 mm inner)
+ *  - Prints upright on Z = 0 with 0% supports, 0 open edges, 0 non-manifold edges!
+ */
+export function buildThreePartSocketCup(
+  config: LampConfig,
+  draft: boolean
+): SolidMeshBuilder {
+  const mb = new SolidMeshBuilder();
+  const N = draft ? 64 : 112;
+  const e26 = getSocketE26Dimensions(config.mount);
+  const cupBaseY = getThreePartCupSeatY(config);
+  const ringBotY = cupBaseY + THREE_PART_CUP_FLARE_HEIGHT_MM;
+  const cupTopY = ringBotY + SLENDER_E26_RING_HEIGHT_MM;
+
+  const rBotOut = THREE_PART_CUP_BASE_OUTER_RADIUS_MM; // 9.25 mm (Ø 18.5 mm)
+  const rTopOut = SLENDER_E26_SOCKET_OUTER_RADIUS_MM; // 23.0 mm (Ø 46.0 mm)
+  const rBore = THREE_PART_CUP_BORE_RADIUS_MM; // 6.75 mm (Ø 13.5 mm slip-fit bore on Ø 13.0 mm tenon)
+  const rSocketHole = e26.holeRadiusMm; // 20.25 mm (Ø 40.5 mm E26/E27 socket bore)
+
+  const outer: ProfileNode[] = [{ y: cupBaseY, r: rBotOut }];
+  const flareSegs = draft ? 5 : 8;
+  for (let i = 1; i <= flareSegs; i++) {
+    const frac = i / flareSegs;
+    outer.push({
+      y: cupBaseY + THREE_PART_CUP_FLARE_HEIGHT_MM * frac,
+      r: rBotOut + (rTopOut - rBotOut) * frac,
+    });
+  }
+  outer.push({ y: cupTopY, r: rTopOut });
+
+  const tenonStopY = Math.min(ringBotY - 2.4, cupBaseY + THREE_PART_TENON_HEIGHT_MM + 0.4);
+  const rShelfInner = Math.min(rSocketHole - 2.0, rBore + (ringBotY - 1.6 - tenonStopY));
+  const inner: ProfileNode[] = [
+    { y: cupTopY, r: rSocketHole },
+    { y: ringBotY, r: rSocketHole },
+    { y: ringBotY - 1.6, r: Math.max(rBore + 1.5, rShelfInner) },
+    { y: tenonStopY, r: rBore },
+    { y: cupBaseY, r: rBore },
+  ];
+
+  buildClosedRevolutionWithOptionalCordSlot(mb, N, outer, inner, null, null, draft);
   return mb;
 }

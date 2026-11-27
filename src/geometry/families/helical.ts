@@ -23,7 +23,7 @@ export const helicalFamily: LampFamilyDefinition = {
   getResolution(config: LampConfig, draft: boolean) {
     const ribs = Math.round(config.helical.ribCount);
     const radialSegs = Math.min(360, Math.max(draft ? 128 : 220, ribs * (draft ? 4 : 7)));
-    const heightSegs = config.helical.obiBelt ? (draft ? 140 : 240) : draft ? 76 : 150;
+    const heightSegs = config.helical.obiBelt ? (draft ? 140 : 240) : draft ? 96 : 180;
     return { radialSegs, heightSegs };
   },
 
@@ -68,13 +68,14 @@ export const helicalFamily: LampFamilyDefinition = {
 
     return (ctx: DisplacementContext): DisplacementResult => {
       const twistAtV = totalTwistRad * ctx.v;
-      const p1 = ctx.theta * ribs + twistAtV;
+      // Real axial twist: twistDeg rotates the entire rib lattice around the central Z axis by twistDeg!
+      const p1 = (ctx.theta + twistAtV) * ribs;
       const primary = evalWave(p1);
 
       let combined = primary;
       if (doubleProfile) {
         // Crisp UMINO F017 Faceted Diamond Cell interference!
-        const p2 = ctx.theta * ribs - twistAtV;
+        const p2 = (ctx.theta - twistAtV) * ribs;
         const secondary = evalWave(p2);
         const mix = Math.max(0.2, Math.min(1.0, doubleMix));
         // Sharp diamond ridge borders around luminous concave/flat diamond windows
@@ -88,7 +89,9 @@ export const helicalFamily: LampFamilyDefinition = {
             : classicCross * 0.65 + Math.max(primary, secondary * mix) * 0.35;
       }
 
-      let outerOffset = combined * halfDepth;
+      // Smoothly attenuate ribDepth to 0 over the bottom 3 mm (v = 0..0.015) so nothing overhangs the flush base!
+      const bottomRibFade = smoothstep(0.0, 0.015, ctx.v);
+      let outerOffset = combined * halfDepth * bottomRibFade;
       let innerFollow = doubleProfile ? 0.3 : 0.42;
 
       if (hasObiBelt) {

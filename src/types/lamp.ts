@@ -23,7 +23,7 @@ export type MountType = 'led_kit_001' | 'e26_e27';
 
 export type MountPosition = 'bottom' | 'top';
 
-export type BuildMode = 'two_part' | 'monoblock';
+export type BuildMode = 'two_part' | 'three_part' | 'monoblock';
 
 export type BaseStyleId = 'dome' | 'pedestal' | 'cylinder' | 'conkel' | 'tripod' | 'compact_flush';
 
@@ -202,7 +202,7 @@ export interface OrigamiParams {
   horizFacets: number;
   /** Number of stacked origami diamond tiers vertically (3 - 12) */
   vertTiers: number;
-  /** Diamond fold protrusion depth (3 - 14 mm) */
+  /** Diamond fold protrusion depth (3 - 16 mm) */
   depth: number;
   /** Subtle progressive helical twist (0 - 180 deg) */
   twistDeg: number;
@@ -210,6 +210,8 @@ export interface OrigamiParams {
   edgeSoftness: number;
   /** Optional thin translucent wall thickness (e.g. 1.0 mm Vase Mode for ZOUKEI 02) */
   wallThickness?: number;
+  /** True low-poly flat triangular Yoshimura origami facets (radialSegs = 2*horizFacets, heightSegs = 2*vertTiers) */
+  realFaceted?: boolean;
 }
 
 export type WovenPattern = 'basket_1x1' | 'knitted' | 'ripple_mesh' | 'grid_mesh';
@@ -320,8 +322,8 @@ export interface LampConfig {
 }
 
 export interface MeshPartData {
-  name: 'lamp' | 'base' | 'shade' | 'diffuser' | 'test_base' | 'adapter';
-  role: 'shade' | 'base' | 'diffuser';
+  name: 'lamp' | 'base' | 'cup' | 'shade' | 'diffuser' | 'test_base' | 'adapter';
+  role: 'shade' | 'base' | 'cup' | 'diffuser';
   positions: Float32Array;
   normals: Float32Array;
   indices: Uint32Array;
@@ -341,6 +343,7 @@ export interface LampMetrics {
   volumeCm3: number;
   gramsPLA: number;
   baseGramsPLA: number;
+  cupGramsPLA: number;
   shadeGramsPLA: number;
   diffuserGramsPLA: number;
   overhangPercent: number;

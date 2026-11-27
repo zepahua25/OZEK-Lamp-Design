@@ -38,6 +38,22 @@ export const SLENDER_E26_SHADE_BORE_RADIUS_MM = 20.4; // Ø 40.8 mm spider inner
 export const SLENDER_E26_SHADE_HUB_OUTER_RADIUS_MM = 24.4; // Ø 48.8 mm spider hub outer (4.0 mm solid clamping flange)
 
 /**
+ * 3-Piece OMOI 01 Architecture ("3 Piezas: Base + Copa + Pantalla"):
+ *  - Piece 1 (Base Ónice): Ribbed dome + ultra-slender Ø 15.0 mm outer / Ø 8.5 mm inner stem + Ø 13.0 × 8.0 mm upper spigot (NO dark funnel!)
+ *  - Piece 2 (Copa Arena): Slip-fits onto the spigot (Ø 13.5 mm bore), flares at 45° (14 mm) to compact E26/E27 Ø 46.0 / Ø 40.5 mm ring (total 17.5 mm)
+ *  - Piece 3 (Pantalla Arena): Flat Z=0 spider with Ø 40.8 mm central bore clamped directly onto Piece 2 by the E26/E27 nut!
+ */
+export const THREE_PART_STEM_OUTER_RADIUS_MM = 7.5; // Ø 15.0 mm exterior
+export const THREE_PART_STEM_INNER_RADIUS_MM = 4.25; // Ø 8.5 mm cable bore
+export const THREE_PART_TENON_OUTER_RADIUS_MM = 6.5; // Ø 13.0 mm upper cylindrical coupling spigot
+export const THREE_PART_TENON_HEIGHT_MM = 8.0; // 8.0 mm press/slip engagement depth into Copa
+export const THREE_PART_CUP_BASE_OUTER_RADIUS_MM = 9.25; // Ø 18.5 mm sleeve foot (2.5 mm solid wall around Ø13.5 mm bore)
+export const THREE_PART_CUP_BORE_RADIUS_MM = 6.75; // Ø 13.5 mm slip-fit bore (+0.25 mm radial clearance for PLA)
+export const THREE_PART_CUP_FLARE_HEIGHT_MM = 14.0; // 45° self-supporting flare from r=9.25 to r=23.0 mm (0% supports!)
+export const THREE_PART_CUP_TOTAL_HEIGHT_MM =
+  THREE_PART_CUP_FLARE_HEIGHT_MM + SLENDER_E26_RING_HEIGHT_MM; // 17.5 mm total Copa height
+
+/**
  * Bayonet vertical geometry constants (mm, localY from collar bottom = 0):
  *  - Male lug lives strictly inside y ∈ [2.2, 7.2] (45° print chamfer up 2.2..3.6, plateau 3.6..6.4, down 6.4..7.2)
  *  - Female twist channel opens generously across y ∈ [1.2, 8.6] (full depth from 2.0..7.6)
@@ -58,8 +74,19 @@ function smoothstep(e0: number, e1: number, x: number): number {
   return t * t * (3 - 2 * t);
 }
 
+/** True when "3 Piezas (Base + Copa + Pantalla)" architecture is active (requires bottom E26/E27). */
+export function isThreePartCupMode(config: LampConfig): boolean {
+  return (
+    config.silhouette.buildMode === 'three_part' &&
+    config.mount.position === 'bottom' &&
+    config.mount.type === 'e26_e27' &&
+    config.base.style !== 'compact_flush'
+  );
+}
+
 /** True when "Cuello Esbelto E26/E27" direct-nut coupling is active (requires E26/E27 mount). */
 export function isSlenderE26Mode(config: LampConfig): boolean {
+  if (isThreePartCupMode(config)) return true;
   return (
     config.mount.type === 'e26_e27' &&
     config.base.style !== 'compact_flush' &&
@@ -117,22 +144,41 @@ export function getEffectiveDomeStemHeightMm(config: LampConfig): number {
   if (config.base.style !== 'dome' || config.mount.type !== 'e26_e27') {
     return 0;
   }
+  if (isThreePartCupMode(config)) {
+    return clamp(config.base.domeStemHeightMm ?? 14, 6, 22);
+  }
   const fallback = config.base.coupling === 'slender_e26' ? 16 : 0;
   return clamp(config.base.domeStemHeightMm ?? fallback, 0, 22);
 }
 
 /**
- * Computes the vertical 45° self-supporting flare height (mm) above the slender Ø 17 mm dome stem
+ * Computes the vertical 45° self-supporting flare height (mm) above the slender dome stem
  * strictly up to the compact Ø 46 mm E26/E27 socket ring (14.5 mm => exact 45°).
  */
 export function getDomeStemFlareHeightMm(config: LampConfig): number {
   const stemH = getEffectiveDomeStemHeightMm(config);
   if (stemH <= 0.1) return 0;
+  if (isThreePartCupMode(config)) return THREE_PART_CUP_FLARE_HEIGHT_MM;
   return Math.max(4, SLENDER_E26_SOCKET_OUTER_RADIUS_MM - DOME_STEM_OUTER_RADIUS_MM);
 }
 
 /**
- * Computes the height (mm) at which the Shade's seating reference rests on top of the Base.
+ * Computes the vertical Y (mm) where Piece 2 (Copa porta-socket) rests on Piece 1 (Base) in 3-piece mode.
+ */
+export function getThreePartCupSeatY(config: LampConfig): number {
+  const { base } = config;
+  if (base.style === 'dome') {
+    const domeH = Math.max(36, base.height);
+    return domeH + getEffectiveDomeStemHeightMm(config);
+  }
+  if (base.style === 'cylinder') {
+    return Math.max(18, base.height);
+  }
+  return Math.max(26, base.height);
+}
+
+/**
+ * Computes the height (mm) at which the Shade's seating reference rests on top of the Base (or Copa in 3-piece mode).
  * For 'compact_flush', the shade rests 100% flush on the table (seatY = 0) and the 15 mm base
  * locks into the embedded female bayonet socket inside the sphere's bottom opening.
  */
@@ -141,11 +187,17 @@ export function getShadeSeatY(config: LampConfig): number {
   if (base.style === 'compact_flush') {
     return 0;
   }
+  if (isThreePartCupMode(config)) {
+    return getThreePartCupSeatY(config) + THREE_PART_CUP_TOTAL_HEIGHT_MM;
+  }
   if (base.style === 'conkel') {
-    return mount.type === 'led_kit_001' ? 11.2 : 8.0;
+    if (mount.type === 'led_kit_001') {
+      return Math.max(11.2, base.height - getCouplingHeightMm(base));
+    }
+    return 8.0;
   }
   if (base.style === 'cylinder') {
-    return Math.max(26, base.height) + base.collarRevealMm;
+    return Math.max(18, base.height) + base.collarRevealMm;
   }
   if (base.style === 'dome') {
     const domeH = Math.max(36, base.height);

@@ -58,7 +58,7 @@ interface RightPanelProps {
   onSelectFamily: (family: LampFamilyId) => void;
   onApplySizePreset: (size: LampSizePreset) => void;
   onExportFullSTL: () => void;
-  onExportPartSTL: (part: 'base' | 'shade' | 'diffuser') => void;
+  onExportPartSTL: (part: 'base' | 'cup' | 'shade' | 'diffuser') => void;
   onExportTestBaseSTL: () => void;
   onExportAdapterSTL: () => void;
   onExportZipPackage: () => void;
@@ -97,7 +97,14 @@ export const RightPanel: React.FC<RightPanelProps> = ({
   const families = listLampFamilies();
   const activeFamily = families.find((f) => f.id === config.family) ?? families[0];
   const isTwoPart =
-    config.silhouette.buildMode === 'two_part' && config.mount.position === 'bottom';
+    (config.silhouette.buildMode === 'two_part' ||
+      config.silhouette.buildMode === 'three_part') &&
+    config.mount.position === 'bottom';
+  const isThreePart =
+    config.silhouette.buildMode === 'three_part' &&
+    config.mount.position === 'bottom' &&
+    config.mount.type === 'e26_e27' &&
+    config.base.style !== 'compact_flush';
   const isExpert = uiMode === 'expert';
 
   const surfaceClass = isNight
@@ -1086,13 +1093,37 @@ export const RightPanel: React.FC<RightPanelProps> = ({
               value={config.origami.depth}
               defaultValue={defaultForFamily.origami.depth}
               min={3.0}
-              max={14.0}
+              max={16.0}
               step={0.5}
               unit="mm"
               dark={isNight}
               onChange={(depth) => updateOrigami({ depth }, true)}
               onCommit={onCommitGeometry}
             />
+            <label
+              className={`flex items-center justify-between gap-2 px-3 py-2 rounded-xl border cursor-pointer transition-colors ${
+                config.origami.realFaceted !== false
+                  ? isNight
+                    ? 'bg-amber-500/12 border-amber-400/40'
+                    : 'bg-amber-50/80 border-amber-300/80'
+                  : isNight
+                    ? 'bg-zinc-800/40 border-zinc-700/60'
+                    : 'bg-zinc-900/[0.02] border-zinc-900/[0.08]'
+              }`}
+            >
+              <div>
+                <div className="text-[12px] font-semibold">Facetado Origami Real</div>
+                <div className={`text-[10.5px] ${mutedText}`}>
+                  Planos triangulares exactos (2× facetas · aristas 100% rectas)
+                </div>
+              </div>
+              <input
+                type="checkbox"
+                checked={config.origami.realFaceted !== false}
+                onChange={(e) => updateOrigami({ realFaceted: e.target.checked }, false)}
+                className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
+              />
+            </label>
             {isExpert && (
               <>
                 <StudioSlider
@@ -1830,6 +1861,49 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                   />
                 </label>
 
+                {(config.base.style === 'conkel' || config.base.style === 'cylinder') && (
+                  <div className="space-y-2">
+                    <StudioSlider
+                      label="Altura de base"
+                      value={config.base.height}
+                      defaultValue={config.base.style === 'conkel' ? 18 : 28}
+                      min={config.base.style === 'conkel' ? 16 : 18}
+                      max={110}
+                      step={2}
+                      unit="mm"
+                      dark={isNight}
+                      onChange={(height) => updateBase({ height }, true)}
+                      onCommit={onCommitGeometry}
+                    />
+                    {config.base.style === 'cylinder' && (
+                      <div className="grid grid-cols-3 gap-1">
+                        {[
+                          { label: 'Baja (18 mm)', h: 18 },
+                          { label: 'Media (38 mm)', h: 38 },
+                          { label: 'Alta (55 mm)', h: 55 },
+                        ].map((opt) => (
+                          <button
+                            key={opt.h}
+                            type="button"
+                            onClick={() => updateBase({ height: opt.h }, false)}
+                            className={`py-1 px-1.5 rounded-lg text-[10.5px] font-medium border transition-colors ${
+                              Math.abs(config.base.height - opt.h) <= 2
+                                ? isNight
+                                  ? 'bg-amber-400 text-zinc-950 border-amber-400'
+                                  : 'bg-zinc-900 text-white border-zinc-900'
+                                : isNight
+                                  ? 'border-zinc-700 text-zinc-300 hover:bg-zinc-800'
+                                  : 'border-zinc-900/10 text-zinc-600 hover:bg-zinc-100'
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {config.base.style === 'dome' && (
                   config.mount.type === 'e26_e27' ? (
                     <StudioSlider
@@ -2119,24 +2193,20 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                   <div className={`pt-2 border-t ${divider} space-y-3`}>
                     {config.base.style !== 'compact_flush' && (
                       <>
-                        <StudioSlider
-                          label="Altura de base"
-                          value={config.base.height}
-                          defaultValue={defaultForFamily.base.height}
-                          min={
-                            config.base.style === 'conkel'
-                              ? 16
-                              : config.base.style === 'cylinder' || config.base.style === 'pedestal'
-                                ? 26
-                                : 40
-                          }
-                          max={110}
-                          step={2}
-                          unit="mm"
-                          dark={isNight}
-                          onChange={(height) => updateBase({ height }, true)}
-                          onCommit={onCommitGeometry}
-                        />
+                        {config.base.style !== 'conkel' && config.base.style !== 'cylinder' && (
+                          <StudioSlider
+                            label="Altura de base"
+                            value={config.base.height}
+                            defaultValue={defaultForFamily.base.height}
+                            min={config.base.style === 'pedestal' ? 26 : 40}
+                            max={110}
+                            step={2}
+                            unit="mm"
+                            dark={isNight}
+                            onChange={(height) => updateBase({ height }, true)}
+                            onCommit={onCommitGeometry}
+                          />
+                        )}
                         <StudioSlider
                           label="Diámetro de base"
                           value={config.base.footRadius * 2}
@@ -2715,9 +2785,24 @@ export const RightPanel: React.FC<RightPanelProps> = ({
             </div>
             <div
               className={`grid gap-1.5 ${
-                config.silhouette.includeDiffuser ? 'grid-cols-2' : 'grid-cols-1'
+                isThreePart || config.silhouette.includeDiffuser ? 'grid-cols-2' : 'grid-cols-1'
               }`}
             >
+              {isThreePart && (
+                <button
+                  type="button"
+                  disabled={isExporting}
+                  onClick={() => onExportPartSTL('cup')}
+                  className={`flex items-center justify-center gap-1 py-1.5 px-2 rounded-xl text-[11px] font-semibold transition-colors ${
+                    isNight
+                      ? 'bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30'
+                      : 'bg-emerald-100/80 text-emerald-950 hover:bg-emerald-200/80'
+                  }`}
+                >
+                  <Download className="w-3 h-3" />
+                  Exportar Copa.stl
+                </button>
+              )}
               {config.silhouette.includeDiffuser && (
                 <button
                   type="button"
@@ -2738,6 +2823,8 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                 disabled={isExporting}
                 onClick={onExportTestBaseSTL}
                 className={`flex items-center justify-center gap-1 py-1.5 px-2 rounded-xl text-[11px] font-medium transition-colors ${
+                  isThreePart && config.silhouette.includeDiffuser ? 'col-span-2 ' : ''
+                }${
                   isNight
                     ? 'bg-zinc-800/60 text-zinc-300 hover:bg-zinc-800'
                     : 'bg-zinc-900/[0.03] text-zinc-600 hover:bg-zinc-900/[0.07]'

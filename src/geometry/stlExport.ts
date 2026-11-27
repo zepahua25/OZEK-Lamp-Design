@@ -140,6 +140,9 @@ export function generateBambuStudioGuide(
   if (metrics.baseGramsPLA > 1) {
     lines.push(`  • Base             : ≈ ${Math.round(metrics.baseGramsPLA)} g PLA`);
   }
+  if (metrics.cupGramsPLA > 1) {
+    lines.push(`  • Copa E26/E27     : ≈ ${Math.round(metrics.cupGramsPLA)} g PLA (imprimir en color Pantalla)`);
+  }
   if (metrics.shadeGramsPLA > 1) {
     lines.push(`  • Pantalla         : ≈ ${Math.round(metrics.shadeGramsPLA)} g PLA`);
   }
@@ -174,6 +177,12 @@ export function generateBambuStudioGuide(
     );
   }
 
+  if (config.silhouette.buildMode === 'three_part' && config.mount.type === 'e26_e27') {
+    lines.push(
+      '  • Copa porta-socket (Pieza 2 · Color Pantalla): Imprimir derecha en Z = 0, 100% sin soportes.',
+      '    Embona sobre la espiga Ø 13 mm del palito fino Ø 15 mm de la Base y aloja el socket E26/E27 (Ø 40.5 mm).'
+    );
+  }
   if (config.base.coupling === 'slender_e26' && config.mount.type === 'e26_e27') {
     lines.push(
       '  • Pantalla (Cuello Esbelto E26/E27 · Araña en Z=0): Imprimir parada derecha en Z = 0,',
@@ -295,6 +304,8 @@ export function buildLampZipPackage(
       fname = `${slugBase}_Base.stl`;
       // Auto-flip Tripod base 180° so flat collar rests on Z=0 and legs grow upward < 42°!
       flipUpsideDown = config.base.style === 'tripod';
+    } else if (part.name === 'cup') {
+      fname = `${slugBase}_Copa.stl`;
     } else if (part.name === 'shade') {
       fname = `${slugBase}_Pantalla.stl`;
     } else if (part.name === 'diffuser') {

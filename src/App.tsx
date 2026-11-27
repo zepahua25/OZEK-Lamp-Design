@@ -350,9 +350,11 @@ export const App: React.FC = () => {
             const suffix =
               part.name === 'base'
                 ? `Base_${cfg.base.style}`
-                : part.name === 'diffuser'
-                  ? 'Difusor'
-                  : 'Pantalla';
+                : part.name === 'cup'
+                  ? 'Copa'
+                  : part.name === 'diffuser'
+                    ? 'Difusor'
+                    : 'Pantalla';
             triggerBinaryDownload(stl, `${baseName}_${suffix}.stl`);
           }
           showToast(`Exportados ${res.parts.length} STL listos para Bambu Studio`);
@@ -367,7 +369,7 @@ export const App: React.FC = () => {
   }, [showToast]);
 
   const handleExportPartSTL = useCallback(
-    (targetRole: 'base' | 'shade' | 'diffuser') => {
+    (targetRole: 'base' | 'cup' | 'shade' | 'diffuser') => {
       setIsExporting(true);
       window.setTimeout(() => {
         try {
@@ -380,16 +382,20 @@ export const App: React.FC = () => {
           const tag =
             targetRole === 'base'
               ? `OZEK_Base_${cfg.base.style}_${cfg.base.coupling}.stl`
-              : targetRole === 'diffuser'
-                ? `OZEK_Difusor_1mm.stl`
-                : `OZEK_Pantalla_${slugify(cfg.family)}_${cfg.base.coupling}.stl`;
+              : targetRole === 'cup'
+                ? `OZEK_Copa_E26.stl`
+                : targetRole === 'diffuser'
+                  ? `OZEK_Difusor_1mm.stl`
+                  : `OZEK_Pantalla_${slugify(cfg.family)}_${cfg.base.coupling}.stl`;
           triggerBinaryDownload(stl, tag);
           const grams =
             targetRole === 'base'
               ? Math.round(res.metrics.baseGramsPLA)
-              : targetRole === 'diffuser'
-                ? Math.round(res.metrics.diffuserGramsPLA)
-                : Math.round(res.metrics.shadeGramsPLA);
+              : targetRole === 'cup'
+                ? Math.round(res.metrics.cupGramsPLA)
+                : targetRole === 'diffuser'
+                  ? Math.round(res.metrics.diffuserGramsPLA)
+                  : Math.round(res.metrics.shadeGramsPLA);
           const flipNote = flipTripod ? ' · volteado 180° sin soportes' : '';
           showToast(`Exportado ${tag} (${grams} g PLA · Z-up mm${flipNote})`);
         } catch (err) {
@@ -577,7 +583,9 @@ export const App: React.FC = () => {
 
   const isNight = config.visual.sceneTheme === 'warm_night';
   const isTwoPart =
-    config.silhouette.buildMode === 'two_part' && config.mount.position === 'bottom';
+    (config.silhouette.buildMode === 'two_part' ||
+      config.silhouette.buildMode === 'three_part') &&
+    config.mount.position === 'bottom';
 
   return (
     <div className="relative w-screen h-screen overflow-hidden">
@@ -611,14 +619,30 @@ export const App: React.FC = () => {
         onChangeUiMode={setUiMode}
         onChangeBuildMode={(buildMode) =>
           handleChangeGeometry(
-            (prev) => ({
-              ...prev,
-              silhouette: { ...prev.silhouette, buildMode },
-              mount:
-                buildMode === 'two_part'
-                  ? { ...prev.mount, position: 'bottom' }
-                  : prev.mount,
-            }),
+            (prev) => {
+              if (buildMode === 'three_part') {
+                return {
+                  ...prev,
+                  silhouette: { ...prev.silhouette, buildMode: 'three_part' },
+                  mount: { ...prev.mount, position: 'bottom', type: 'e26_e27' },
+                  base: {
+                    ...prev.base,
+                    style: prev.base.style === 'compact_flush' ? 'dome' : prev.base.style,
+                    coupling: 'slender_e26',
+                    spiderBayonet: false,
+                    domeStemHeightMm: Math.max(10, prev.base.domeStemHeightMm ?? 14),
+                  },
+                };
+              }
+              return {
+                ...prev,
+                silhouette: { ...prev.silhouette, buildMode },
+                mount:
+                  buildMode === 'two_part'
+                    ? { ...prev.mount, position: 'bottom' }
+                    : prev.mount,
+              };
+            },
             false
           )
         }

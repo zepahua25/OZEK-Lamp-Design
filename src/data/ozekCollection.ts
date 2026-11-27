@@ -45,10 +45,10 @@ export interface OzekSignaturePiece {
 }
 
 /**
- * 1) OMOI 01 · 思い (Intención y Origen)
- * Plisado fino japonés (72 pliegues, 1.1 mm Arena), Falda = 0 mm, araña plana Z=0 con anillo central Ø 40.8 mm
- * sujetado directo con la tuerca E26/E27 sobre Cuello Esbelto real (Ø 17 mm × 16 mm, ensanche 45° a Ø 46 / Ø 40.5 mm)
- * y Base cúpula acanalada Gris Ónice + sello trasero Z☰ sobre el arco del cable, talla S (150 mm).
+ * 1) OMOI 01 · 思い (Intención y Origen) — Arquitectura 3 Piezas (Base + Copa + Pantalla)
+ * Pieza 1 (Base Ónice): Cúpula acanalada con palito delgado Ø 15 mm exterior × Ø 8.5 mm interior y espiga superior Ø 13 mm (sin embudo oscuro).
+ * Pieza 2 (Copa Arena): Embona sobre el palito en color Arena, aloja el socket E26/E27 (Ø 40.5 mm) y soporta la pantalla (0% soportes).
+ * Pieza 3 (Pantalla Arena): Plisado fino japonés (72 pliegues, 1.1 mm), araña plana Z=0 con aro central Ø 40.8 mm fijado con tuerca E26.
  */
 function buildOmoi01(): LampConfig {
   const cfg = cloneConfig(DEFAULT_CONFIG);
@@ -64,7 +64,7 @@ function buildOmoi01(): LampConfig {
   cfg.silhouette.skirtWaveAmp = 0; // Flat Z=0 spider bracket -> 0% supports!
   cfg.silhouette.closeTopDome = false;
   cfg.silhouette.includeDiffuser = false;
-  cfg.silhouette.buildMode = 'two_part';
+  cfg.silhouette.buildMode = 'three_part'; // 3 Piezas: Base Ónice + Copa Arena + Pantalla Arena!
 
   cfg.japaneseFlute.count = 72;
   cfg.japaneseFlute.depth = 2.0;
@@ -74,8 +74,8 @@ function buildOmoi01(): LampConfig {
   cfg.base.style = 'dome';
   cfg.base.finish = 'ribbed';
   cfg.base.ribCount = 68;
-  cfg.base.height = 52; // 52 dome + 16 stem (Ø17) + 14.5 45°-flare + 3.5 E26 ring = 86 seatY => 86 + 150 = 236 mm (<= 245 mm A1!)
-  cfg.base.domeStemHeightMm = 16;
+  cfg.base.height = 52; // 52 dome + 14 stem (Ø15) + 17.5 Copa Arena = 83.5 seatY => 83.5 + 150 = 233.5 mm (<= 245 mm A1!)
+  cfg.base.domeStemHeightMm = 14;
   cfg.base.footRadius = 60;
   cfg.base.neckRadius = 23.0;
   cfg.base.coupling = 'slender_e26';
@@ -101,9 +101,9 @@ function buildOmoi01(): LampConfig {
 
 /**
  * 2) ZOUKEI 02 · 造形 (Dar forma y Esculpir)
- * Linterna Origami chōchin ovalada (~140 × 180 mm, 10 facetas × 4 niveles diamante marcados 11 mm,
- * edgeSoftness 0.08, pared 1.0 mm Arena, Modo Jarrón 0% soportes), abierta arriba y abajo,
- * sobre Base Compacta al ras (15 mm) Gris Ónice con LED Kit 001 y sello trasero Z☰.
+ * Linterna Origami chōchin ovalada (~140 × 180 mm) con rombos triangulares planos reales (10 × 4, profundidad 14 mm,
+ * pared 1.0 mm Arena, Modo Jarrón 0% soportes), sobre Base Cilíndrica limpia en Gris Ónice (18 mm baja, ajustable 18–55 mm)
+ * alineada al radio exacto (r = 46 mm) con Bambu LED Kit 001 y sello trasero Z☰.
  */
 function buildZoukei02(): LampConfig {
   const cfg = cloneConfig(DEFAULT_CONFIG);
@@ -129,15 +129,16 @@ function buildZoukei02(): LampConfig {
 
   cfg.origami.horizFacets = 10;
   cfg.origami.vertTiers = 4;
-  cfg.origami.depth = 11.0; // Pliegues geométricos profundos y escultóricos (10–12 mm)
+  cfg.origami.depth = 14.0; // Rombos planos profundos y arquitectónicos (14 mm)
   cfg.origami.twistDeg = 0;
-  cfg.origami.edgeSoftness = 0.08; // Aristas vivas con mínimo bisel FDM
+  cfg.origami.edgeSoftness = 0.08;
   cfg.origami.wallThickness = 1.0; // Pared translúcida 1.0 mm Modo Jarrón
+  cfg.origami.realFaceted = true; // Resolución exacta 2*horizFacets × 2*vertTiers (planos triangulares reales!)
 
-  cfg.base.style = 'compact_flush';
+  cfg.base.style = 'cylinder';
   cfg.base.finish = 'smooth';
-  cfg.base.height = 15;
-  cfg.base.footRadius = 37.5;
+  cfg.base.height = 18; // Base cilíndrica limpia baja (18 mm), ajustable a alta (35–55 mm)!
+  cfg.base.footRadius = 46; // Alineada al ras con el radio exacto de ZOUKEI 02 (46 mm)
   cfg.base.coupling = 'bayonet';
   cfg.base.bayonetLugs = 3;
   cfg.base.couplingClearance = 0.35;
@@ -160,8 +161,8 @@ function buildZoukei02(): LampConfig {
 
 /**
  * 3) EN 03 · 円 / ☰ (Plenitud y Congruencia)
- * Torre arquitectónica helicoidal marcada (48 pliegues profundos 3.8 mm, espiral real 240°) sobre silueta Reloj de Arena esbelta
- * con Cinturón ☰ (3 anillos en cintura), Pantalla Cobre (#C87D55), Base baja Gris Ónice (28 mm) + sello Z☰, talla L (205 mm).
+ * Torre arquitectónica helicoidal con giro real de 60° (48 costillas, 3.8 mm) sobre silueta Reloj de Arena esbelta
+ * con Cinturón ☰ (3 anillos en cintura), Pantalla Cobre (#C87D55) alineada al ras sobre Base Gris Ónice (28 mm, r=56 mm) + sello Z☰.
  */
 function buildEn03(): LampConfig {
   const cfg = cloneConfig(DEFAULT_CONFIG);
@@ -187,7 +188,7 @@ function buildEn03(): LampConfig {
 
   cfg.helical.ribCount = 48;
   cfg.helical.ribDepth = 3.8;
-  cfg.helical.twistDeg = 240;
+  cfg.helical.twistDeg = 60; // 60° reales de giro axial de abajo hacia arriba (~35° diagonal elegante, <= 45°!)
   cfg.helical.twistDirection = 1;
   cfg.helical.profile = 'sawtooth';
   cfg.helical.doubleProfile = false;
@@ -197,7 +198,7 @@ function buildEn03(): LampConfig {
   cfg.base.style = 'cylinder';
   cfg.base.finish = 'smooth';
   cfg.base.height = 28;
-  cfg.base.footRadius = 54;
+  cfg.base.footRadius = 56; // Radio exacto del borde inferior de la pantalla (56 mm) -> unión al ras!
   cfg.base.coupling = 'bayonet';
   cfg.base.bayonetLugs = 3;
   cfg.base.couplingClearance = 0.35;
@@ -285,10 +286,10 @@ export const OZEK_SIGNATURE_COLLECTION: OzekSignaturePiece[] = [
     kanji: '思い',
     title: 'Intención y Origen',
     narrative: 'Luz serena y proporción pura; plisado fino japonés sin deslumbramiento.',
-    subtitle: 'Plisado 72 (1.1 mm) · Cuello esbelto Ø17 mm E26 · S 150 mm',
-    badge: '0% soportes',
+    subtitle: '3 Piezas (Base Ø15 + Copa Arena + Plisado 72) · S 150 mm',
+    badge: '0% soportes · 3 Piezas',
     dfmSupportNote:
-      'OMOI 01: 0% soportes en Base Cúpula con Cuello Esbelto Ø17 mm (ensanche 45° a anillo E26 Ø46 / Ø40.5 mm) y Pantalla (araña plana Z = 0 con aro Ø40.8 mm fijado con tuerca E26).',
+      'OMOI 01 (3 Piezas): 0% soportes en Base Ónice (palito Ø15 mm + espiga Ø13 mm), Copa Arena porta-socket E26/E27 (Ø40.5 mm) y Pantalla cónica (araña Z = 0 con aro Ø40.8 mm).',
     swatches: ['#F5F2EB', '#252525'],
     config: buildOmoi01(),
   },
@@ -298,10 +299,10 @@ export const OZEK_SIGNATURE_COLLECTION: OzekSignaturePiece[] = [
     kanji: '造形',
     title: 'Dar forma y Esculpir',
     narrative: 'Linterna escultórica en pliegues de origami; luz y sombra arquitectónica en Modo Jarrón.',
-    subtitle: 'Origami 10×4 (11 mm · Arena) · Base Al Ras 15 mm · 140×180 mm',
+    subtitle: 'Origami 10×4 plano real (14 mm) · Base Cilindro 18 mm · 140×180 mm',
     badge: '0% soportes · Modo Jarrón',
     dfmSupportNote:
-      'ZOUKEI 02: 0% soportes en Base Compacta al ras (15 mm) y Linterna Origami 10×4 (abierta arriba/abajo, ideal en Modo Jarrón o pared fina 1.0 mm).',
+      'ZOUKEI 02: 0% soportes en Base Cilíndrica limpia (18–55 mm) y Linterna Origami 10×4 de rombos planos reales (abierta arriba/abajo, Modo Jarrón 1.0 mm).',
     swatches: ['#F5F2EB', '#252525'],
     config: buildZoukei02(),
   },
@@ -311,10 +312,10 @@ export const OZEK_SIGNATURE_COLLECTION: OzekSignaturePiece[] = [
     kanji: '円 / ☰',
     title: 'Plenitud y Congruencia',
     narrative: 'Torre arquitectónica helicoidal ceñida por el trigrama ☰.',
-    subtitle: 'Reloj de Arena 48 pliegues (240°) + Cinturón ☰ · L 205 mm',
+    subtitle: 'Reloj de Arena 48 pliegues (60° reales) + Cinturón ☰ · L 205 mm',
     badge: '0% soportes',
     dfmSupportNote:
-      'EN 03: 0% soportes en Base y Pantalla (espiral helicoidal 240° y cinturón ☰ de 3 anillos con flancos ≤ 45°).',
+      'EN 03: 0% soportes en Base (al ras Ø112 mm) y Pantalla (giro axial real de 60° y cinturón ☰ de 3 anillos con flancos ≤ 45°).',
     swatches: ['#C87D55', '#252525'],
     config: buildEn03(),
   },

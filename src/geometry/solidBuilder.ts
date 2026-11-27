@@ -1,6 +1,10 @@
 import { LampConfig, MeshPartData } from '../types/lamp';
 import { aggregateMetrics, finalizePartGeometry } from './analyzer';
-import { buildIndependentBase, SolidMeshBuilder } from './baseBuilder';
+import {
+  buildIndependentBase,
+  buildThreePartSocketCup,
+  SolidMeshBuilder,
+} from './baseBuilder';
 import {
   BAYONET_DEPTH_MM,
   COMPACT_FLUSH_LUG_DEPTH_MM,
@@ -15,6 +19,7 @@ import {
   getEffectiveNeckRadius,
   getShadeSeatY,
   isSlenderE26Mode,
+  isThreePartCupMode,
 } from './coupling';
 import { getLampFamily } from './registry';
 import {
@@ -509,6 +514,216 @@ function appendSculptedFlatSpider(
 }
 
 /**
+ * True low-poly flat-triangle Yoshimura Origami Shade builder (0% micro-subdivisions, 100% watertight 2-manifold!):
+ *  - Component A: Pure low-poly outer + inner Origami shell with exact resolution
+ *    `N = horizFacets * 2` × `M = vertTiers * 2`, alternating valley-to-valley quad diagonals
+ *    so EVERY diamond pyramid face is a dead-flat architectural triangle with knife-sharp creases!
+ *  - Component B: High-res smooth circular female coupling collar (bayonet / thread / spider / slender_e26)
+ *    embedded cleanly into the flat Z = 0 Origami bottom ring for precision mechanical locking on the Base!
+ */
+function buildRealOrigamiShade(
+  config: LampConfig,
+  seatY: number,
+  draft: boolean
+): SolidMeshBuilder {
+  const mb = new SolidMeshBuilder();
+  const { silhouette, base, origami } = config;
+  const shadeHeight = getEffectiveShadeHeight(silhouette);
+  const wallT = clamp(config.mount.wallThickness, 1.6, 3.2);
+  const evalWall = createWallEvaluator(config, false);
+
+  const isCompactFlush = base.style === 'compact_flush';
+  const isSlenderE26 = isSlenderE26Mode(config);
+  const rMaleBase = getEffectiveNeckRadius(config);
+  const extraCouplingDepth = isCompactFlush
+    ? COMPACT_FLUSH_LUG_DEPTH_MM + 0.25
+    : couplingUsesBayonet(base)
+      ? BAYONET_DEPTH_MM + 0.25
+      : base.coupling === 'thread'
+        ? THREAD_DEPTH_MM
+        : 0;
+  const effectiveClr =
+    !isCompactFlush && base.coupling === 'gravity_seat'
+      ? Math.max(0.4, base.couplingClearance)
+      : clamp(base.couplingClearance, 0.2, 0.65);
+  const rHubOut = isSlenderE26
+    ? SLENDER_E26_SHADE_HUB_OUTER_RADIUS_MM
+    : rMaleBase + effectiveClr + extraCouplingDepth + Math.max(2.6, wallT + 0.6);
+
+  const deckH = isCompactFlush
+    ? COMPACT_FLUSH_RIM_HEIGHT_MM
+    : isSlenderE26
+      ? SLENDER_E26_RING_HEIGHT_MM
+      : 3.2;
+  const collarH = isSlenderE26 ? SLENDER_E26_RING_HEIGHT_MM : getCouplingHeightMm(base);
+  const minInnerAtBottom = rHubOut + 1.2;
+
+  // --- COMPONENT A: Exact Low-Poly Yoshimura Origami Shell (N = 2*horizFacets, M = 2*vertTiers) ---
+  const hf = Math.max(6, Math.min(24, Math.round(origami.horizFacets)));
+  const vt = Math.max(3, Math.min(12, Math.round(origami.vertTiers)));
+  const N = hf * 2;
+  const M = vt * 2;
+  const cosHalfStep = Math.cos(Math.PI / N);
+
+  const outRing: Int32Array[] = [];
+  const inRing: Int32Array[] = [];
+  let minBotOutR = Infinity;
+  let minBotInR = Infinity;
+
+  for (let row = 0; row <= M; row++) {
+    const yLocal = (shadeHeight * row) / M;
+    const yWorld = seatY + yLocal;
+    const oArr = new Int32Array(N);
+    const iArr = new Int32Array(N);
+    for (let s = 0; s < N; s++) {
+      const u = s / N;
+      const theta = u * Math.PI * 2;
+      const sample = evalWall.sampleOuterAndInner(
+        u,
+        theta,
+        yLocal,
+        shadeHeight,
+        minInnerAtBottom,
+        0
+      );
+      if (row === 0) {
+        if (sample.rOut < minBotOutR) minBotOutR = sample.rOut;
+        if (sample.rIn < minBotInR) minBotInR = sample.rIn;
+      }
+      oArr[s] = mb.addCyl(sample.rOut, theta, yWorld, sample.localThickness);
+      iArr[s] = mb.addCyl(sample.rIn, theta, yWorld, sample.localThickness);
+    }
+    outRing.push(oArr);
+    inRing.push(iArr);
+  }
+
+  for (let s = 0; s < N; s++) {
+    const u0 = s;
+    const u1 = (s + 1) % N;
+    for (let row = 0; row < M; row++) {
+      const aO = outRing[row][u0];
+      const bO = outRing[row][u1];
+      const cO = outRing[row + 1][u1];
+      const dO = outRing[row + 1][u0];
+      const aI = inRing[row][u0];
+      const bI = inRing[row][u1];
+      const cI = inRing[row + 1][u1];
+      const dI = inRing[row + 1][u0];
+
+      // Alternating valley-to-valley diagonal split creates symmetrical 4-triangle Yoshimura diamond pyramids!
+      if (((row + s) & 1) === 0) {
+        mb.addTri(aO, bO, cO);
+        mb.addTri(aO, cO, dO);
+        mb.addTri(aI, cI, bI);
+        mb.addTri(aI, dI, cI);
+      } else {
+        mb.addTri(aO, bO, dO);
+        mb.addTri(bO, cO, dO);
+        mb.addTri(aI, dI, bI);
+        mb.addTri(bI, dI, cI);
+      }
+    }
+    // Flat closed bottom rim at Z = 0 (y = seatY) and top rim at y = seatY + shadeHeight
+    mb.addQuad(inRing[0][u0], inRing[0][u1], outRing[0][u1], outRing[0][u0]);
+    mb.addQuad(inRing[M][u0], outRing[M][u0], outRing[M][u1], inRing[M][u1]);
+  }
+
+  // --- COMPONENT B: Precision Smooth Circular Female Coupling Hub & Anchoring Flange ---
+  const Nhub = draft ? 64 : 112;
+  const D = isCompactFlush ? 1 : 2;
+  const upperSub = isSlenderE26 ? 0 : isCompactFlush ? (draft ? 12 : 22) : draft ? 8 : 14;
+  const C = D + upperSub;
+
+  const collarY: number[] = [];
+  for (let i = 0; i <= D; i++) {
+    collarY.push(seatY + (deckH * i) / D);
+  }
+  for (let i = 1; i <= upperSub; i++) {
+    collarY.push(seatY + deckH + ((collarH - deckH) * i) / upperSub);
+  }
+
+  // Embed circular bottom flange solidly into the inscribed inner wall of the Origami bottom rim (never poking out!)
+  const rEdgeOut = minBotOutR * cosHalfStep;
+  const rEdgeIn = minBotInR * cosHalfStep;
+  const rFlangeOut = Math.max(
+    rHubOut + 0.8,
+    Math.min(rEdgeOut - 0.35, rEdgeIn + 0.55)
+  );
+
+  const flushCordHalfRad = isCompactFlush
+    ? Math.asin(clamp(4.7 / Math.max(38, rFlangeOut), 0.075, 0.16))
+    : 0;
+  const flushCordPeakMm = isCompactFlush ? 4.5 : 0;
+  const flushCordArchAtTheta = (theta: number): number => {
+    if (!isCompactFlush) return 0;
+    const wrapped = Math.atan2(Math.sin(theta), Math.cos(theta));
+    const a = Math.abs(wrapped);
+    if (a >= flushCordHalfRad) return 0;
+    return (1 - a / flushCordHalfRad) * flushCordPeakMm;
+  };
+
+  const hubIn: Int32Array[] = [];
+  const hubOut: Int32Array[] = [];
+  for (let row = 0; row <= C; row++) {
+    const yWorld = collarY[row];
+    const hiArr = new Int32Array(Nhub);
+    const hoArr = new Int32Array(Nhub);
+    const rOutHere = row <= D ? rFlangeOut : rHubOut;
+    for (let u = 0; u < Nhub; u++) {
+      const theta = (u / Nhub) * Math.PI * 2;
+      const yVert = row === 0 ? yWorld + flushCordArchAtTheta(theta) : yWorld;
+      const rInCollar = isSlenderE26
+        ? SLENDER_E26_SHADE_BORE_RADIUS_MM
+        : evaluateFemaleCouplingRadius(rMaleBase, theta, yVert - seatY, base);
+      const safeRIn = Math.min(rInCollar, rHubOut - 1.4);
+      hiArr[u] = mb.addCyl(safeRIn, theta, yVert, rOutHere - safeRIn);
+      hoArr[u] = mb.addCyl(rOutHere, theta, yVert, rOutHere - safeRIn);
+    }
+    hubIn.push(hiArr);
+    hubOut.push(hoArr);
+  }
+  // Extra ring at row = D at radius rHubOut so step from rFlangeOut -> rHubOut is 100% manifold (zero T-junctions!)
+  const stepRing = new Int32Array(Nhub);
+  if (C > D) {
+    for (let u = 0; u < Nhub; u++) {
+      const theta = (u / Nhub) * Math.PI * 2;
+      stepRing[u] = mb.addCyl(rHubOut, theta, collarY[D], 2.5);
+    }
+  }
+
+  for (let s = 0; s < Nhub; s++) {
+    const u0 = s;
+    const u1 = (s + 1) % Nhub;
+    // Inner female bore (0..C)
+    for (let row = 0; row < C; row++) {
+      mb.addQuad(hubIn[row][u0], hubIn[row + 1][u0], hubIn[row + 1][u1], hubIn[row][u1]);
+    }
+    // Lower flange outer wall (0..D)
+    for (let row = 0; row < D; row++) {
+      mb.addQuad(hubOut[row][u0], hubOut[row][u1], hubOut[row + 1][u1], hubOut[row + 1][u0]);
+    }
+    // Bottom rim (row 0)
+    mb.addQuad(hubIn[0][u0], hubIn[0][u1], hubOut[0][u1], hubOut[0][u0]);
+    if (C > D) {
+      // Horizontal flange top deck from stepRing -> hubOut[D]
+      mb.addQuad(stepRing[u0], hubOut[D][u0], hubOut[D][u1], stepRing[u1]);
+      // Upper collar outer wall: stepRing -> hubOut[D+1] .. hubOut[C]
+      mb.addQuad(stepRing[u0], stepRing[u1], hubOut[D + 1][u1], hubOut[D + 1][u0]);
+      for (let row = D + 1; row < C; row++) {
+        mb.addQuad(hubOut[row][u0], hubOut[row][u1], hubOut[row + 1][u1], hubOut[row + 1][u0]);
+      }
+      // Top collar rim
+      mb.addQuad(hubIn[C][u0], hubOut[C][u0], hubOut[C][u1], hubIn[C][u1]);
+    } else {
+      // Flush ring (slender_e26): top rim closes directly hubIn[D] -> hubOut[D]
+      mb.addQuad(hubIn[D][u0], hubOut[D][u0], hubOut[D][u1], hubIn[D][u1]);
+    }
+  }
+
+  return mb;
+}
+
+/**
  * Builds the independent SHADE part for Two-Part Lamp mode!
  * v2.0 FDM Upgrade:
  *  - When `coupling === 'spider'`, the 4 thin (3 mm) radial spider arms slope UPWARD at **45°**
@@ -522,6 +737,15 @@ function buildCoupledShade(
   heightSegs: number,
   draft: boolean
 ): SolidMeshBuilder {
+  // Real flat-triangle low-poly Yoshimura Origami mode (exact 2*horizFacets × 2*vertTiers facets + circular coupling hub!)
+  if (
+    config.family === 'origami' &&
+    config.origami.realFaceted !== false &&
+    !config.silhouette.closeTopDome &&
+    (config.silhouette.skirtWaveAmp ?? 0) <= 0.15
+  ) {
+    return buildRealOrigamiShade(config, seatY, draft);
+  }
   const mb = new SolidMeshBuilder();
   const { silhouette, base, mount } = config;
   const shadeHeight = getEffectiveShadeHeight(silhouette);
@@ -1349,11 +1573,15 @@ export function generateLampGeometry(
   const parts: MeshPartData[] = [];
   const partStats: Array<ReturnType<typeof finalizePartGeometry>> = [];
 
+  const isMultiPart =
+    (config.silhouette.buildMode === 'two_part' || config.silhouette.buildMode === 'three_part') &&
+    !isPendant;
+
   if (clipHeightMm !== undefined && clipHeightMm > 0) {
     const effShadeH = getEffectiveShadeHeight(config.silhouette);
     const clippedH = Math.min(effShadeH, Math.max(15, clipHeightMm));
     const mb =
-      config.silhouette.buildMode === 'two_part' && !isPendant && config.base.style !== 'tripod'
+      isMultiPart && config.base.style !== 'tripod'
         ? buildIndependentBase(config, draft, clippedH)
         : config.mount.type === 'led_kit_001'
           ? buildLedKit001Monoblock(
@@ -1390,7 +1618,7 @@ export function generateLampGeometry(
       overhang: fin.overhang,
     });
     partStats.push(fin);
-  } else if (config.silhouette.buildMode === 'two_part' && !isPendant) {
+  } else if (isMultiPart) {
     const baseMb = buildIndependentBase(config, draft);
     const baseRaw = baseMb.buildBuffers(undefined);
     const baseFin = finalizePartGeometry(
@@ -1410,6 +1638,29 @@ export function generateLampGeometry(
       overhang: baseFin.overhang,
     });
     partStats.push(baseFin);
+
+    // Piece 2 ("Copa porta-socket E26/E27", shade color) in 3-Piece OMOI 01 mode!
+    if (isThreePartCupMode(config)) {
+      const cupMb = buildThreePartSocketCup(config, draft);
+      const cupRaw = cupMb.buildBuffers(undefined);
+      const cupFin = finalizePartGeometry(
+        cupRaw.positions,
+        cupRaw.indices,
+        cupRaw.thickness,
+        config.visual.overhangAngle,
+        !doValidate
+      );
+      parts.push({
+        name: 'cup',
+        role: 'cup',
+        positions: cupRaw.positions,
+        normals: cupFin.normals,
+        indices: cupRaw.indices,
+        thickness: cupRaw.thickness,
+        overhang: cupFin.overhang,
+      });
+      partStats.push(cupFin);
+    }
 
     const seatY = getShadeSeatY(config);
     const shadeMb = buildCoupledShade(config, seatY, radialSegs, heightSegs, draft);

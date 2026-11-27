@@ -47,7 +47,9 @@ export function getEffectiveShadeHeight(p: SilhouetteParams): number {
 export function getMinSafeShadeBaseRadius(config: LampConfig): number {
   const { silhouette, base, mount } = config;
   const wallT = clamp(mount.wallThickness, 1.6, 3.2);
-  const isTwoPart = silhouette.buildMode === 'two_part' && mount.position === 'bottom';
+  const isTwoPart =
+    (silhouette.buildMode === 'two_part' || silhouette.buildMode === 'three_part') &&
+    mount.position === 'bottom';
 
   if (isTwoPart) {
     if (isSlenderE26Mode(config)) {

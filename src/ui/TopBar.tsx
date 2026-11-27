@@ -100,10 +100,10 @@ export const TopBar: React.FC<TopBarProps> = ({
         </button>
       </div>
 
-      {/* Construction Mode: 1 Pieza vs 2 Piezas */}
+      {/* Construction Mode: 1 Pieza vs 2 Piezas vs 3 Piezas */}
       <div
         className={`pointer-events-auto flex items-center gap-0.5 p-1 rounded-full border backdrop-blur-md shadow-sm ${groupPill}`}
-        title="Modo de construcción: 1 Pieza unificada o 2 Piezas separadas (Base + Pantalla)"
+        title="Modo de construcción: 1 Pieza, 2 Piezas (Base + Pantalla) o 3 Piezas (Base + Copa E26 + Pantalla)"
       >
         <button
           type="button"
@@ -122,6 +122,16 @@ export const TopBar: React.FC<TopBarProps> = ({
           }`}
         >
           2 Piezas
+        </button>
+        <button
+          type="button"
+          onClick={() => onChangeBuildMode('three_part')}
+          title="3 Piezas (Base + Copa + Pantalla): Base con palito fino Ø15 mm + Copa porta-socket en color Pantalla + Pantalla"
+          className={`px-2.5 py-1 rounded-full text-[11.5px] font-medium transition-all ${
+            buildMode === 'three_part' ? activeChip : idleChip
+          }`}
+        >
+          3 Piezas
         </button>
       </div>
 
