@@ -130,7 +130,8 @@ interface WallEvaluator {
     yLocal: number,
     totalHeight: number,
     minInnerR: number,
-    mountFlatBandMm: number
+    mountFlatBandMm: number,
+    patternThetaOverride?: number
   ): { rOut: number; rIn: number; localThickness: number };
 }
 
@@ -150,7 +151,8 @@ function createWallEvaluator(
       yLocal: number,
       totalHeight: number,
       minInnerR: number,
-      mountFlatBandMm: number
+      mountFlatBandMm: number,
+      patternThetaOverride?: number
     ) {
       const vLocal = clamp(yLocal / Math.max(totalHeight, 1), 0, 1);
       const vDesign = invertedForPendant ? 1 - vLocal : vLocal;
@@ -215,13 +217,18 @@ function createWallEvaluator(
       const topDomeFade = isClosedDome ? 1 - smoothstep(0.78, 0.985, vDesign) : 1.0;
       const patternFade = bottomFade * topDomeFade * (1 - sculpt.smoothMask * 0.65 * sculptEnv);
 
+      const useGridTwist = patternThetaOverride !== undefined;
+      const patternTheta = useGridTwist
+        ? patternThetaOverride + sculpt.dThetaRad * sculptEnv
+        : effTheta;
       const disp = patternEval({
-        u: (((effTheta / (2 * Math.PI)) % 1) + 1) % 1,
-        theta: effTheta,
+        u: (((patternTheta / (2 * Math.PI)) % 1) + 1) % 1,
+        theta: patternTheta,
         v: vDesign,
         y: vDesign * totalHeight,
         baseRadius: baseR,
         height: totalHeight,
+        gridTwisted: useGridTwist,
       });
 
       let rIn: number;
@@ -731,6 +738,272 @@ function buildRealOrigamiShade(
 }
 
 /**
+ * Real Perforated Open-Lattice Shade ("Celosía Calada — Huecos Reales", KŌBŌ 04):
+ * Builds a 100% watertight 2-manifold perforated lattice shade with genuine physical through-holes:
+ *  - Component 1a: Solid bottom outer binding ring (anchored flush onto the base drum)
+ *  - Component 1b: Smooth circular female coupling hub (bayonet / thread / etc.) embedded into bottom ring
+ *  - Component 2 : Solid clean top binding ring
+ *  - Components 3 & 4: Two opposing families of K (16–22) continuous helical diagonal bars (+45° / -45°,
+ *    ~2.0 mm true width × 2.4 mm thickness, adaptive 3D overhang strictly <= 43° => 0% supports!)
+ *    framing wide-open diamond windows through which the white Arena internal diffuser is physically visible!
+ */
+function buildOpenLatticeShade(
+  config: LampConfig,
+  seatY: number,
+  draft: boolean
+): SolidMeshBuilder {
+  const mb = new SolidMeshBuilder();
+  const { silhouette, base, woven, mount } = config;
+  const shadeHeight = getEffectiveShadeHeight(silhouette);
+  const wallT = clamp(mount.wallThickness, 1.6, 3.2);
+
+  const isCompactFlush = base.style === 'compact_flush';
+  const isThreePart = isThreePartCupMode(config);
+  const isSlenderE26 = isSlenderE26Mode(config);
+  const rMaleBase = getEffectiveNeckRadius(config);
+  const extraCouplingDepth = isCompactFlush
+    ? COMPACT_FLUSH_LUG_DEPTH_MM + 0.25
+    : couplingUsesBayonet(base)
+      ? BAYONET_DEPTH_MM + 0.25
+      : base.coupling === 'thread'
+        ? THREAD_DEPTH_MM
+        : 0;
+  const effectiveClr =
+    !isCompactFlush && base.coupling === 'gravity_seat'
+      ? Math.max(0.4, base.couplingClearance)
+      : clamp(base.couplingClearance, 0.2, 0.65);
+  const rHubOut = isThreePart
+    ? THREE_PART_SHADE_HUB_OUTER_RADIUS_MM
+    : isSlenderE26
+      ? SLENDER_E26_SHADE_HUB_OUTER_RADIUS_MM
+      : rMaleBase + effectiveClr + extraCouplingDepth + Math.max(2.6, wallT + 0.6);
+
+  const deckH = isCompactFlush
+    ? COMPACT_FLUSH_RIM_HEIGHT_MM
+    : isSlenderE26
+      ? SLENDER_E26_RING_HEIGHT_MM
+      : 3.2;
+  const collarH = isSlenderE26 ? SLENDER_E26_RING_HEIGHT_MM : getCouplingHeightMm(base);
+
+  const bottomRingH = Math.max(deckH + 3.8, 7.5);
+  const topRingH = 6.5;
+  const ringWallThick = 2.6;
+  const barWidthMm = 2.0; // ~2.0 mm perpendicular bar width
+  const barThickMm = 2.4; // ~2.4 mm radial bar thickness
+  const barCount = Math.max(16, Math.min(22, Math.round(woven.horizFreq || 18)));
+
+  const sampleOuterR = (theta: number, v: number): number => {
+    const baseR = evaluateSilhouetteRadius(v, silhouette);
+    const blend = smoothstep(0.0, 0.08, v);
+    const cs = evaluateCrossSectionMultiplier(theta, v, silhouette, blend);
+    return Math.max(rHubOut + ringWallThick + 1.0, baseR * cs);
+  };
+
+  // --- Helper: Closed 2-manifold solid silhouette ring spanning [y0, y1] ---
+  const appendSolidRing = (y0: number, y1: number, segsN: number, segsV: number): void => {
+    const outRings: Int32Array[] = [];
+    const inRings: Int32Array[] = [];
+    for (let row = 0; row <= segsV; row++) {
+      const yWorld = y0 + ((y1 - y0) * row) / segsV;
+      const v = clamp((yWorld - seatY) / Math.max(shadeHeight, 1), 0, 1);
+      const oArr = new Int32Array(segsN);
+      const iArr = new Int32Array(segsN);
+      for (let u = 0; u < segsN; u++) {
+        const theta = (u / segsN) * Math.PI * 2;
+        const rOut = sampleOuterR(theta, v);
+        const rIn = Math.max(rHubOut + 0.6, rOut - ringWallThick);
+        oArr[u] = mb.addCyl(rOut, theta, yWorld, rOut - rIn);
+        iArr[u] = mb.addCyl(rIn, theta, yWorld, rOut - rIn);
+      }
+      outRings.push(oArr);
+      inRings.push(iArr);
+    }
+    for (let s = 0; s < segsN; s++) {
+      const u0 = s;
+      const u1 = (s + 1) % segsN;
+      for (let row = 0; row < segsV; row++) {
+        mb.addQuad(outRings[row][u0], outRings[row][u1], outRings[row + 1][u1], outRings[row + 1][u0]);
+        mb.addQuad(inRings[row][u0], inRings[row + 1][u0], inRings[row + 1][u1], inRings[row][u1]);
+      }
+      mb.addQuad(inRings[0][u0], inRings[0][u1], outRings[0][u1], outRings[0][u0]);
+      mb.addQuad(inRings[segsV][u0], outRings[segsV][u0], outRings[segsV][u1], inRings[segsV][u1]);
+    }
+  };
+
+  const Nhub = draft ? 64 : 112;
+  // Component 1a: Bottom solid outer binding ring (flush with base drum!)
+  appendSolidRing(seatY, seatY + bottomRingH, Nhub, 3);
+  // Component 2: Top solid architectural binding ring
+  appendSolidRing(seatY + shadeHeight - topRingH, seatY + shadeHeight, Nhub, 3);
+
+  // Component 1b: Smooth circular female coupling hub + bottom anchoring flange embedded into bottom ring
+  const D = isCompactFlush ? 1 : 2;
+  const upperSub = isSlenderE26 ? 0 : isCompactFlush ? (draft ? 12 : 22) : draft ? 8 : 14;
+  const C = D + upperSub;
+  const collarY: number[] = [];
+  for (let i = 0; i <= D; i++) {
+    collarY.push(seatY + (deckH * i) / D);
+  }
+  for (let i = 1; i <= upperSub; i++) {
+    collarY.push(seatY + deckH + ((collarH - deckH) * i) / upperSub);
+  }
+
+  let minBotOutR = Infinity;
+  for (let u = 0; u < 32; u++) {
+    const r = sampleOuterR((u / 32) * Math.PI * 2, 0);
+    if (r < minBotOutR) minBotOutR = r;
+  }
+  const rFlangeOut = Math.max(rHubOut + 1.0, minBotOutR - 0.55);
+
+  const flushCordHalfRad = isCompactFlush
+    ? Math.asin(clamp(4.7 / Math.max(38, rFlangeOut), 0.075, 0.16))
+    : 0;
+  const flushCordPeakMm = isCompactFlush ? 4.5 : 0;
+  const flushCordArchAtTheta = (theta: number): number => {
+    if (!isCompactFlush) return 0;
+    const wrapped = Math.atan2(Math.sin(theta), Math.cos(theta));
+    const a = Math.abs(wrapped);
+    if (a >= flushCordHalfRad) return 0;
+    return (1 - a / flushCordHalfRad) * flushCordPeakMm;
+  };
+
+  const hubIn: Int32Array[] = [];
+  const hubOut: Int32Array[] = [];
+  for (let row = 0; row <= C; row++) {
+    const yWorld = collarY[row];
+    const hiArr = new Int32Array(Nhub);
+    const hoArr = new Int32Array(Nhub);
+    const rOutHere = row <= D ? rFlangeOut : rHubOut;
+    for (let u = 0; u < Nhub; u++) {
+      const theta = (u / Nhub) * Math.PI * 2;
+      const yVert = row === 0 ? yWorld + flushCordArchAtTheta(theta) : yWorld;
+      const rInCollar = isThreePart
+        ? THREE_PART_SHADE_BORE_RADIUS_MM
+        : isSlenderE26
+          ? SLENDER_E26_SHADE_BORE_RADIUS_MM
+          : evaluateFemaleCouplingRadius(rMaleBase, theta, yVert - seatY, base);
+      const safeRIn = Math.min(rInCollar, rHubOut - 1.4);
+      hiArr[u] = mb.addCyl(safeRIn, theta, yVert, rOutHere - safeRIn);
+      hoArr[u] = mb.addCyl(rOutHere, theta, yVert, rOutHere - safeRIn);
+    }
+    hubIn.push(hiArr);
+    hubOut.push(hoArr);
+  }
+  const stepRing = new Int32Array(Nhub);
+  if (C > D) {
+    for (let u = 0; u < Nhub; u++) {
+      const theta = (u / Nhub) * Math.PI * 2;
+      stepRing[u] = mb.addCyl(rHubOut, theta, collarY[D], 2.5);
+    }
+  }
+  for (let s = 0; s < Nhub; s++) {
+    const u0 = s;
+    const u1 = (s + 1) % Nhub;
+    for (let row = 0; row < C; row++) {
+      mb.addQuad(hubIn[row][u0], hubIn[row + 1][u0], hubIn[row + 1][u1], hubIn[row][u1]);
+    }
+    for (let row = 0; row < D; row++) {
+      mb.addQuad(hubOut[row][u0], hubOut[row][u1], hubOut[row + 1][u1], hubOut[row + 1][u0]);
+    }
+    mb.addQuad(hubIn[0][u0], hubIn[0][u1], hubOut[0][u1], hubOut[0][u0]);
+    if (C > D) {
+      mb.addQuad(stepRing[u0], hubOut[D][u0], hubOut[D][u1], stepRing[u1]);
+      mb.addQuad(stepRing[u0], stepRing[u1], hubOut[D + 1][u1], hubOut[D + 1][u0]);
+      for (let row = D + 1; row < C; row++) {
+        mb.addQuad(hubOut[row][u0], hubOut[row][u1], hubOut[row + 1][u1], hubOut[row + 1][u0]);
+      }
+      mb.addQuad(hubIn[C][u0], hubOut[C][u0], hubOut[C][u1], hubIn[C][u1]);
+    } else {
+      mb.addQuad(hubIn[D][u0], hubOut[D][u0], hubOut[D][u1], hubIn[D][u1]);
+    }
+  }
+
+  // --- Components 3 & 4: Two Opposing Families of Continuous Crossed Helical Bars (+45° / -45°) ---
+  // Each bar embeds 2.5 mm solidly into both the Bottom Ring and Top Ring, with adaptive 3D angle <= 43° (0% supports!).
+  const yStart = seatY + bottomRingH - 2.5;
+  const yEnd = seatY + shadeHeight - topRingH + 2.5;
+  const barSegs = draft ? 28 : 48;
+  const dy = (yEnd - yStart) / barSegs;
+
+  const yArr = new Float64Array(barSegs + 1);
+  const vArr = new Float64Array(barSegs + 1);
+  const rBaseArr = new Float64Array(barSegs + 1);
+  const thetaOffArr = new Float64Array(barSegs + 1);
+  const tanAlphaArr = new Float64Array(barSegs + 1);
+
+  for (let j = 0; j <= barSegs; j++) {
+    yArr[j] = yStart + dy * j;
+    vArr[j] = clamp((yArr[j] - seatY) / Math.max(shadeHeight, 1), 0, 1);
+    rBaseArr[j] = Math.max(rHubOut + ringWallThick + 1.0, evaluateSilhouetteRadius(vArr[j], silhouette));
+  }
+
+  // Adaptive 3D printability integration: sqrt((dr/dy)^2 + (r * dtheta/dy)^2) <= 0.94 (<= 43.2°, 0% supports!)
+  const maxTanTotal = 0.94;
+  const desiredTanTangential = 0.88; // ~41.3° crisp open diamond lattice
+  let accumTheta = 0;
+  for (let j = 0; j <= barSegs; j++) {
+    const jPrev = Math.max(0, j - 1);
+    const jNext = Math.min(barSegs, j + 1);
+    const drDy = (rBaseArr[jNext] - rBaseArr[jPrev]) / Math.max(1e-4, yArr[jNext] - yArr[jPrev]);
+    const radialBudget = Math.max(0.22 * 0.22, maxTanTotal * maxTanTotal - drDy * drDy);
+    const tanHere = Math.min(desiredTanTangential, Math.sqrt(radialBudget));
+    tanAlphaArr[j] = tanHere;
+    thetaOffArr[j] = accumTheta;
+    if (j < barSegs) {
+      const rMid = 0.5 * (rBaseArr[j] + rBaseArr[j + 1]);
+      accumTheta += (tanHere / Math.max(22, rMid)) * dy;
+    }
+  }
+
+  // Sweep each bar in both opposing families (+1 and -1) as a closed 2-manifold 4-sided tube
+  for (const dir of [1, -1] as const) {
+    // Invisible 0.02 mm radial separation prevents WebGL Z-fighting at bar crossings while fusing cleanly in Bambu Studio
+    const antiZFightR = dir * 0.02;
+    for (let k = 0; k < barCount; k++) {
+      const theta0 = (2 * Math.PI * k) / barCount;
+      const v0Ring = new Int32Array(barSegs + 1);
+      const v1Ring = new Int32Array(barSegs + 1);
+      const v2Ring = new Int32Array(barSegs + 1);
+      const v3Ring = new Int32Array(barSegs + 1);
+
+      for (let j = 0; j <= barSegs; j++) {
+        const yWorld = yArr[j];
+        const v = vArr[j];
+        const thetaC = theta0 + dir * thetaOffArr[j];
+        const csMult = evaluateCrossSectionMultiplier(
+          thetaC,
+          v,
+          silhouette,
+          smoothstep(0.0, 0.08, v)
+        );
+        const rOut = rBaseArr[j] * csMult + antiZFightR;
+        const rIn = Math.max(rHubOut + 0.5, rOut - barThickMm);
+        const cosAlpha = 1 / Math.sqrt(1 + tanAlphaArr[j] * tanAlphaArr[j]);
+        const halfAng = (barWidthMm * 0.5) / (Math.max(18, rOut) * cosAlpha);
+
+        v0Ring[j] = mb.addCyl(rIn, thetaC - halfAng, yWorld, barThickMm);
+        v1Ring[j] = mb.addCyl(rIn, thetaC + halfAng, yWorld, barThickMm);
+        v2Ring[j] = mb.addCyl(rOut, thetaC + halfAng, yWorld, barThickMm);
+        v3Ring[j] = mb.addCyl(rOut, thetaC - halfAng, yWorld, barThickMm);
+      }
+
+      for (let j = 0; j < barSegs; j++) {
+        // Outer (+r), Inner (-r), Right (+theta), Left (-theta) — all verified outward-facing winding!
+        mb.addQuad(v3Ring[j], v2Ring[j], v2Ring[j + 1], v3Ring[j + 1]);
+        mb.addQuad(v0Ring[j], v0Ring[j + 1], v1Ring[j + 1], v1Ring[j]);
+        mb.addQuad(v2Ring[j], v1Ring[j], v1Ring[j + 1], v2Ring[j + 1]);
+        mb.addQuad(v0Ring[j], v3Ring[j], v3Ring[j + 1], v0Ring[j + 1]);
+      }
+      // Closed bottom cap (-Y) and top cap (+Y) embedded inside the solid rings
+      mb.addQuad(v0Ring[0], v1Ring[0], v2Ring[0], v3Ring[0]);
+      mb.addQuad(v0Ring[barSegs], v3Ring[barSegs], v2Ring[barSegs], v1Ring[barSegs]);
+    }
+  }
+
+  return mb;
+}
+
+/**
  * Builds the independent SHADE part for Two-Part Lamp mode!
  * v2.0 FDM Upgrade:
  *  - When `coupling === 'spider'`, the 4 thin (3 mm) radial spider arms slope UPWARD at **45°**
@@ -744,6 +1017,15 @@ function buildCoupledShade(
   heightSegs: number,
   draft: boolean
 ): SolidMeshBuilder {
+  // Real Perforated Open-Lattice mode ("Celosía Calada — Huecos Reales", KŌBŌ 04!)
+  if (
+    config.family === 'woven' &&
+    config.woven.pattern === 'open_lattice' &&
+    !config.silhouette.closeTopDome &&
+    (config.silhouette.skirtWaveAmp ?? 0) <= 0.15
+  ) {
+    return buildOpenLatticeShade(config, seatY, draft);
+  }
   // Real flat-triangle low-poly Yoshimura Origami mode (exact 2*horizFacets × 2*vertTiers facets + circular coupling hub!)
   if (
     config.family === 'origami' &&
@@ -889,8 +1171,34 @@ function buildCoupledShade(
     }
     const restH = Math.max(10, shadeHeight - deckH);
     const bodySegs = Math.max(12, heightSegs);
+    const upperYs: number[] = [];
     for (let j = 1; j <= bodySegs; j++) {
-      shellY.push(seatY + deckH + (restH * j) / bodySegs);
+      upperYs.push(seatY + deckH + (restH * j) / bodySegs);
+    }
+
+    // CAD Precision for EN 03's 3-ring Obi belt (☰): inject exact crisp Y-rings across the waist band
+    // hitting every ring crest (-2.5, 0, +2.5 mm) & valley (-1.25, +1.25 mm) without blurring!
+    if (config.family === 'helical' && config.helical.obiBelt) {
+      const yWaistCenter = seatY + shadeHeight * 0.5;
+      const obiOffsets = [
+        -6.5, -5.8, -5.0, -4.3, -3.75, -3.2, -2.8, -2.5, -2.2, -1.8, -1.25, -0.7, -0.3, 0.0,
+        0.3, 0.7, 1.25, 1.8, 2.2, 2.5, 2.8, 3.2, 3.75, 4.3, 5.0, 5.8, 6.5,
+      ];
+      for (const dyOff of obiOffsets) {
+        const yCand = yWaistCenter + dyOff;
+        if (yCand > seatY + deckH + 0.5 && yCand < seatY + shadeHeight - 0.5) {
+          upperYs.push(yCand);
+        }
+      }
+      upperYs.sort((a, b) => a - b);
+    }
+
+    let lastY = shellY[shellY.length - 1];
+    for (const yVal of upperYs) {
+      if (yVal - lastY >= 0.12 || Math.abs(yVal - (seatY + shadeHeight)) < 1e-4) {
+        shellY.push(yVal);
+        lastY = yVal;
+      }
     }
   }
 
@@ -898,6 +1206,12 @@ function buildCoupledShade(
   const ANCHOR_START = S_LOW;
   const ANCHOR_END = S_LOW + D;
   const minInnerAtBottom = canVent ? rHubOut + 5.5 : rHubOut + 1.2;
+
+  // CAD Helix-Aligned Mesh Grid: when a family defines axial twist (e.g. EN 03 helical spiral),
+  // progressively rotate the mesh rings themselves along the helix (thetaWorld = thetaBase - twistAtV)
+  // and evaluate the rib wave on thetaBase -> ZERO sawtooth aliasing & razor-sharp industrial CAD edges!
+  const axialTwistRad = getLampFamily(config.family).getAxialTwistRad?.(config) ?? 0;
+  const useHelixGrid = Math.abs(axialTwistRad) > 1e-4 && !useSlopedSpider;
 
   // 1. Allocate outer & inner shade shell rings
   const isClosedPole = Boolean(silhouette.closeTopDome) && mount.type === 'led_kit_001';
@@ -909,21 +1223,27 @@ function buildCoupledShade(
     const yLocal = yWorld - seatY;
     const vRow = clamp(yLocal / Math.max(shadeHeight, 1), 0, 1);
     const yInOffset = isClosedPole ? capWallMm * smoothstep(0.74, 1.0, vRow) : 0;
+    // Keep bottom anchor band (0..deckH) 100% untwisted for exact alignment with circular bayonet hub!
+    const vTwist =
+      yLocal <= deckH ? 0 : clamp((yLocal - deckH) / Math.max(1, shadeHeight - deckH), 0, 1);
+    const ringTwistOffset = useHelixGrid ? -axialTwistRad * vTwist : 0;
     const oArr = new Int32Array(N);
     const iArr = new Int32Array(N);
     for (let u = 0; u < N; u++) {
-      const theta = thetas[u];
+      const thetaBase = thetas[u];
+      const thetaWorld = thetaBase + ringTwistOffset;
       const s = evalWall.sampleOuterAndInner(
         u / N,
-        theta,
+        thetaWorld,
         yLocal,
         shadeHeight,
         minInnerAtBottom,
-        deckH + 1.5
+        deckH + 1.5,
+        useHelixGrid ? thetaBase : undefined
       );
-      const yVert = row === 0 ? yWorld + flushCordArchAtTheta(theta) : yWorld;
-      oArr[u] = mb.addCyl(s.rOut, theta, yVert, s.localThickness);
-      iArr[u] = mb.addCyl(s.rIn, theta, yVert - yInOffset, s.localThickness);
+      const yVert = row === 0 ? yWorld + flushCordArchAtTheta(thetaWorld) : yWorld;
+      oArr[u] = mb.addCyl(s.rOut, thetaWorld, yVert, s.localThickness);
+      iArr[u] = mb.addCyl(s.rIn, thetaWorld, yVert - yInOffset, s.localThickness);
     }
     outRing.push(oArr);
     inRing.push(iArr);
@@ -1144,18 +1464,28 @@ function buildInternalDiffuser(
 
   // Sample minimum inner radius along shade height so diffuser never clips the outer shade
   let minShadeIn = Infinity;
+  let minUpperShadeIn = Infinity;
   for (let i = 0; i <= 10; i++) {
-    const r = evaluateSilhouetteRadius(i / 10, silhouette) - mount.wallThickness - 4.0;
+    const v = i / 10;
+    const r = evaluateSilhouetteRadius(v, silhouette) - mount.wallThickness - 4.0;
     if (r < minShadeIn) minShadeIn = r;
+    if (v >= 0.2 && r < minUpperShadeIn) minUpperShadeIn = r;
   }
 
+  const isOpenLattice = config.family === 'woven' && config.woven.pattern === 'open_lattice';
   const rSeatOut = Math.max(18, Math.min(baseInnerBore - 0.35, minShadeIn));
-  const rBodyOut = Math.max(18, Math.min(rNeck - 2.0, minShadeIn));
+  // For KŌBŌ 04 Open Lattice, flare at 45° (0% supports!) to a generous glowing Arena cylinder clearly visible behind the black mesh!
+  const rBodyOut = isOpenLattice
+    ? Math.max(rSeatOut, Math.min(minUpperShadeIn - 6.0, 44.0))
+    : Math.max(18, Math.min(rNeck - 2.0, minShadeIn));
   const rBodyIn = Math.max(16, rBodyOut - wallT);
   const rSeatIn = Math.max(16, rSeatOut - wallT);
 
   const collarClearY = mount.type === 'led_kit_001' ? getCouplingHeightMm(config.base) : 0;
-  const diffHeight = Math.max(50, getEffectiveShadeHeight(silhouette) * 0.86 - collarClearY);
+  const diffHeight = Math.max(
+    50,
+    getEffectiveShadeHeight(silhouette) * (isOpenLattice ? 0.9 : 0.86) - collarClearY
+  );
   const yStart = seatY + collarClearY;
   const ySeatStep = yStart + 4.5;
   const yFlareEnd = ySeatStep + Math.abs(rBodyOut - rSeatOut);

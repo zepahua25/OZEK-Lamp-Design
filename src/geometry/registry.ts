@@ -23,6 +23,8 @@ export interface DisplacementContext {
   baseRadius: number;
   /** Total lamp height in mm */
   height: number;
+  /** True when the mesh grid rings have already been rotated along the helix (do not add twistAtV again!) */
+  gridTwisted?: boolean;
 }
 
 export interface DisplacementResult {
@@ -57,6 +59,8 @@ export interface LampFamilyDefinition {
   createEvaluator(config: LampConfig): (ctx: DisplacementContext) => DisplacementResult;
   /** Optional post-pass to append watertight sculpted fins/ribbons anchored into the smooth diffuser core */
   appendExtraGeometry?(ctx: ExtraGeometryContext): void;
+  /** Optional axial twist in radians so solidBuilder rotates mesh rings directly along the helix (CAD-grade zero aliasing!) */
+  getAxialTwistRad?(config: LampConfig): number;
   /** Whether bottom spoked ventilation is requested for this family */
   wantsBottomVentilation?(config: LampConfig): boolean;
 }

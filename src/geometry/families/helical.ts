@@ -21,10 +21,28 @@ export const helicalFamily: LampFamilyDefinition = {
   tagline: 'Costillas en espiral cálidas o torre reloj de arena ceñida con cinturón ☰',
 
   getResolution(config: LampConfig, draft: boolean) {
-    const ribs = Math.round(config.helical.ribCount);
-    const radialSegs = Math.min(360, Math.max(draft ? 128 : 220, ribs * (draft ? 4 : 7)));
-    const heightSegs = config.helical.obiBelt ? (draft ? 140 : 240) : draft ? 96 : 180;
+    const ribs = Math.max(12, Math.min(64, Math.round(config.helical.ribCount)));
+    // Exact integer multiple of ribCount (4 samples/rib in draft, 8 or 4 in final) so EVERY crest & valley
+    // lands directly on a mesh edge along the twisted helix — ZERO sawtooth aliasing & lighter CAD STL!
+    const perRib = draft ? 4 : ribs * 8 <= 384 ? 8 : 4;
+    const radialSegs = Math.max(48, ribs * perRib);
+    // Because mesh columns follow the diagonal ribs directly, vertical resolution stays super clean & lean
+    // (solidBuilder additionally injects dense local Y-rings right inside the 3-ring Obi belt!)
+    const heightSegs = config.helical.doubleProfile
+      ? draft
+        ? 96
+        : 180
+      : draft
+        ? 56
+        : 112;
     return { radialSegs, heightSegs };
+  },
+
+  getAxialTwistRad(config: LampConfig): number {
+    if (config.helical.doubleProfile) return 0;
+    const deg = config.helical.twistDeg || 0;
+    if (Math.abs(deg) < 0.01) return 0;
+    return ((deg * Math.PI) / 180) * config.helical.twistDirection;
   },
 
   wantsBottomVentilation(config: LampConfig): boolean {
@@ -58,8 +76,8 @@ export const helicalFamily: LampFamilyDefinition = {
         const tri = 1 - 4 * Math.abs(norm - 0.5);
         return Math.sign(tri) * Math.pow(Math.abs(tri), 0.78);
       }
-      // 'sawtooth' — crisp angled directional blades like UMINO Amber Spiral (Image 1)
-      const peakPos = 0.2;
+      // 'sawtooth' — crisp angled directional blades (peakPos = 0.25 lands EXACTLY on mesh column u % 4 === 1!)
+      const peakPos = 0.25;
       if (norm < peakPos) {
         return -1 + (2 * norm) / peakPos;
       }
@@ -68,8 +86,9 @@ export const helicalFamily: LampFamilyDefinition = {
 
     return (ctx: DisplacementContext): DisplacementResult => {
       const twistAtV = totalTwistRad * ctx.v;
-      // Real axial twist: twistDeg rotates the entire rib lattice around the central Z axis by twistDeg!
-      const p1 = (ctx.theta + twistAtV) * ribs;
+      // When the mesh grid rings are already helix-aligned (ctx.gridTwisted === true), evaluate strictly on
+      // thetaBase without adding twistAtV again so every mesh edge follows the exact diagonal crest & valley!
+      const p1 = ctx.gridTwisted ? ctx.theta * ribs : (ctx.theta + twistAtV) * ribs;
       const primary = evalWave(p1);
 
       let combined = primary;

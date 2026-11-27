@@ -50,6 +50,9 @@ export const wovenFamily: LampFamilyDefinition = {
   tagline: 'Mimbre, Punto (Knitted), RippleMesh profundo y Rejilla luminosa con pared interior lisa',
 
   getResolution(config: LampConfig, draft: boolean) {
+    if (config.woven.pattern === 'open_lattice') {
+      return { radialSegs: draft ? 72 : 120, heightSegs: draft ? 48 : 80 };
+    }
     const isCellMode =
       config.woven.pattern === 'ripple_mesh' || config.woven.pattern === 'grid_mesh';
     const hf = isCellMode
@@ -74,7 +77,7 @@ export const wovenFamily: LampFamilyDefinition = {
     const { horizFreq, vertFreq, relief, rippleDepth, pattern, fdmSmoothing } = config.woven;
     const smooth = clamp(fdmSmoothing, 0, 1);
 
-    const isRipple = pattern === 'ripple_mesh';
+    const isRipple = pattern === 'ripple_mesh' || pattern === 'open_lattice';
     const isGrid = pattern === 'grid_mesh';
     const isCellMode = isRipple || isGrid;
 

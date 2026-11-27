@@ -1216,9 +1216,54 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                   )
                 }
               />
+              <SegmentedControl
+                value={config.woven.pattern}
+                dark={isNight}
+                options={[
+                  { value: 'open_lattice', label: 'Celosía Calada (Huecos Reales)' },
+                ]}
+                onChange={(pattern) =>
+                  updateWoven(
+                    {
+                      pattern,
+                      horizFreq: Math.min(22, Math.max(16, Math.round(config.woven.horizFreq || 18))),
+                    },
+                    false
+                  )
+                }
+              />
             </div>
 
-            {config.woven.pattern === 'ripple_mesh' || config.woven.pattern === 'grid_mesh' ? (
+            {config.woven.pattern === 'open_lattice' ? (
+              <>
+                <div
+                  className={`px-3 py-2 rounded-xl border text-[11px] leading-snug ${
+                    isNight
+                      ? 'bg-emerald-500/10 border-emerald-400/35 text-emerald-100'
+                      : 'bg-emerald-50/80 border-emerald-300/80 text-emerald-950'
+                  }`}
+                >
+                  <div className="font-semibold">Malla Calada Perforada Real (0% soportes)</div>
+                  <div className="opacity-80 mt-0.5">
+                    Rombos abiertos de lado a lado entre barras cruzadas a ≤ 45° (2.0 × 2.4 mm).
+                    El Difusor Interno Arena queda visible físicamente a través de la celosía.
+                  </div>
+                </div>
+                <StudioSlider
+                  label="Barras diagonales por sentido (±45°)"
+                  value={Math.min(22, Math.max(16, Math.round(config.woven.horizFreq || 18)))}
+                  defaultValue={18}
+                  min={16}
+                  max={22}
+                  step={1}
+                  minLabel="16 (abierta)"
+                  maxLabel="22 (cerrada)"
+                  dark={isNight}
+                  onChange={(horizFreq) => updateWoven({ horizFreq }, true)}
+                  onCommit={onCommitGeometry}
+                />
+              </>
+            ) : config.woven.pattern === 'ripple_mesh' || config.woven.pattern === 'grid_mesh' ? (
               <>
                 <StudioSlider
                   label={

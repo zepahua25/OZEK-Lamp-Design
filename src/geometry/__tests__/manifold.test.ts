@@ -1410,29 +1410,48 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
     expect(evaluateHankoSealDepthMm(-1.33, -1.82, sealSpec), 'Z☰ diagonal passes lower-left (-u,-v)').toBeGreaterThan(0.35);
     expect(evaluateHankoSealDepthMm(1.33, -1.82, sealSpec), 'Z☰ lower-right gap (+u,-v) is raised').toBeLessThan(0.05);
 
-    // 3D base mesh check on KŌBŌ 04 (smooth cylinder r = 48 mm flush with shade base, collarRevealMm = 0, seal lowered at yCenter = 16.75 mm):
+    // 3D base mesh & REAL Perforated Open Lattice check on KŌBŌ 04 (r = 48 mm flush, open_lattice 18 bars ±45° + Arena Diffuser):
     const kobo04 = cloneConfig(OZEK_SIGNATURE_COLLECTION.find((p) => p.id === 'kobo-04')!.config);
+    expect(kobo04.woven.pattern).toBe('open_lattice');
     expect(kobo04.woven.horizFreq).toBe(18);
-    expect(kobo04.woven.vertFreq).toBe(14);
-    expect(kobo04.woven.rippleDepth).toBeCloseTo(5.5, 2);
     expect(kobo04.silhouette.includeDiffuser).toBe(true);
     expect(kobo04.base.footRadius).toBe(48);
     expect(kobo04.base.collarRevealMm).toBe(0);
     expect(kobo04.silhouette.controlPoints[0].r).toBe(48);
-    // Smooth bottom 3 mm RippleMesh fade (v = 0 => exact flush wallThickness, zero bottom notch/lip!)
-    const evalKobo = wovenFamily.createEvaluator(kobo04);
-    expect(
-      evalKobo({ u: 0.25, theta: Math.PI / 2, v: 0, y: 0, baseRadius: 48, height: 175 })
-        .explicitWallThicknessMm,
-      'KŌBŌ 04 bottom rim (v=0) flush wall thickness'
-    ).toBeCloseTo(kobo04.mount.wallThickness, 2);
     // Trapezoidal 45° shoulder silhouette check: narrow base (v=0, r=48) -> max shoulder at v=0.22 -> slight inward taper to v=1.0
     expect(kobo04.silhouette.controlPoints[1].v).toBeCloseTo(0.22, 2);
     expect(kobo04.silhouette.controlPoints[1].r).toBeGreaterThan(kobo04.silhouette.controlPoints[0].r + 25);
     expect(kobo04.silhouette.controlPoints[4].r).toBeLessThan(kobo04.silhouette.controlPoints[1].r);
 
     const koboRes = generateLampGeometry(kobo04, { draft: false, validateManifold: true });
-    expect(koboRes.parts, 'KŌBŌ 04 has Base + Diffuser + Shade').toHaveLength(3);
+    expect(koboRes.parts, 'KŌBŌ 04 has Base + Diffuser + Perforated Shade').toHaveLength(3);
+    expect(koboRes.metrics.openEdges, 'KŌBŌ 04 open_lattice 0 boundary edges').toBe(0);
+    expect(koboRes.metrics.nonManifoldEdges, 'KŌBŌ 04 open_lattice 0 non-manifold edges').toBe(0);
+    expect(koboRes.metrics.isWatertight, 'KŌBŌ 04 open_lattice watertight').toBe(true);
+    // Real perforated lattice uses far less PLA than the old ~322 g solid wall & stays <= 45° support-free!
+    expect(koboRes.metrics.shadeGramsPLA, 'KŌBŌ 04 perforated lattice shade is lightweight (< 190 g PLA)').toBeLessThan(190);
+    expect(koboRes.metrics.shadeGramsPLA, 'KŌBŌ 04 perforated lattice shade has real solid volume (> 40 g)').toBeGreaterThan(40);
+    expect(koboRes.metrics.overhangPercent, 'KŌBŌ 04 crossed ±45° lattice <= 45° support-free').toBeLessThan(5.0);
+
+    const koboShade = koboRes.parts.find((p) => p.role === 'shade')!;
+    const koboShadeStl = exportPartToBinarySTL(koboShade);
+    const koboShadeRep = validateBinarySTLManifold(koboShadeStl);
+    expect(koboShadeRep.degenerateTriangles, 'KŌBŌ 04 Open Lattice STL 0 degenerate tris').toBe(0);
+    expect(koboShadeRep.openEdges, 'KŌBŌ 04 Open Lattice STL 0 welded boundary edges').toBe(0);
+    expect(koboShadeRep.nonManifoldEdges, 'KŌBŌ 04 Open Lattice STL 0 welded non-manifold edges').toBe(0);
+    expect(koboShadeRep.isWatertight, 'KŌBŌ 04 Open Lattice STL watertight').toBe(true);
+    expect(koboShadeRep.minZ, 'KŌBŌ 04 Open Lattice STL minZ === 0').toBeCloseTo(0, 3);
+
+    // Also verify 16-bar and 22-bar Open Lattice extremes are 100% watertight
+    for (const bars of [16, 22]) {
+      const kBar = cloneConfig(kobo04);
+      kBar.woven.horizFreq = bars;
+      const kBarRes = generateLampGeometry(kBar, { draft: true, validateManifold: true });
+      expect(kBarRes.metrics.openEdges, `open_lattice ${bars} bars openEdges`).toBe(0);
+      expect(kBarRes.metrics.nonManifoldEdges, `open_lattice ${bars} bars nonManifold`).toBe(0);
+      expect(kBarRes.metrics.isWatertight, `open_lattice ${bars} bars watertight`).toBe(true);
+    }
+
     const koboBase = koboRes.parts.find((p) => p.role === 'base')!;
     const yCenterKobo = 9.0 + 1.5 + 12.5 * 0.5; // 16.75 mm (just above gableClearY = 9.0 mm!)
     let upperRightDebossed = 0; // screen upper-right = z < 0, y > yCenter
@@ -1504,13 +1523,49 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
     expect(zoukeiCrystalRes.metrics.nonManifoldEdges, 'Origami 24×12 outward crystal nonManifold').toBe(0);
     expect(zoukeiCrystalRes.metrics.isWatertight, 'Origami 24×12 outward crystal watertight').toBe(true);
 
-    // 3. Verify EN 03 · 円 / ☰ REAL axial helical twist (60°, 48 ribs, flush 56 mm base, bottom 3 mm fade = 0!)
+    // 3. Verify EN 03 · 円 / ☰ CAD HELIX-ALIGNED MESH (60°, 48 ribs, exact multiple radialSegs, 0 sawtooth aliasing!)
     const en03 = cloneConfig(OZEK_SIGNATURE_COLLECTION.find((p) => p.id === 'en-03')!.config);
     expect(en03.helical.twistDeg).toBe(60);
     expect(en03.helical.ribCount).toBe(48);
     expect(en03.helical.ribDepth).toBeCloseTo(3.8, 2);
     expect(en03.helical.obiBelt).toBe(true);
     expect(en03.base.footRadius).toBe(en03.silhouette.baseRadius);
+    // Exact integer multiple of ribCount so every crest & valley aligns directly on a mesh column!
+    const en03ResSpec = helicalFamily.getResolution(en03, false);
+    expect(en03ResSpec.radialSegs % en03.helical.ribCount, 'EN 03 radialSegs exact multiple of ribCount').toBe(0);
+    expect(helicalFamily.getAxialTwistRad?.(en03), 'EN 03 exposes 60° axial grid twist').toBeCloseTo(
+      (60 * Math.PI) / 180,
+      4
+    );
+    // Verify EN 03 shade STL passes slicer-grade Binary STL welded manifold validation AND mesh columns twist by exact 60°!
+    const en03Built = generateLampGeometry(en03, { draft: false, validateManifold: true });
+    const en03Shade = en03Built.parts.find((p) => p.role === 'shade')!;
+    const en03StlRep = validateBinarySTLManifold(exportPartToBinarySTL(en03Shade));
+    expect(en03StlRep.degenerateTriangles, 'EN 03 helix-aligned STL 0 degenerate tris').toBe(0);
+    expect(en03StlRep.openEdges, 'EN 03 helix-aligned STL 0 welded open edges').toBe(0);
+    expect(en03StlRep.nonManifoldEdges, 'EN 03 helix-aligned STL 0 welded non-manifold edges').toBe(0);
+    expect(en03StlRep.isWatertight, 'EN 03 helix-aligned STL watertight').toBe(true);
+    // Column u = 0 sits at theta = 0 at row 0 (bottom) and rotates to theta = -60° (-π/3) at top row!
+    const N_en03 = en03ResSpec.radialSegs;
+    const xBot = en03Shade.positions[0];
+    const zBot = en03Shade.positions[2];
+    const thetaBot = Math.atan2(-zBot, xBot);
+    // Find the top-most vertex of column u = 0 (first vertex in each ring stride = 2 * N_en03 verts per row: outRing + inRing!)
+    let topCol0Theta = 0;
+    let topCol0Y = -Infinity;
+    for (let row = 0; row * 2 * N_en03 * 3 < en03Shade.positions.length; row++) {
+      const off = row * 2 * N_en03 * 3;
+      const y = en03Shade.positions[off + 1];
+      if (y > topCol0Y) {
+        topCol0Y = y;
+        topCol0Theta = Math.atan2(-en03Shade.positions[off + 2], en03Shade.positions[off]);
+      }
+      if (y >= 28 + en03.silhouette.height - 0.05) break;
+    }
+    expect(topCol0Theta - thetaBot, 'EN 03 column u=0 twists by exact -60° along the helix').toBeCloseTo(
+      (-60 * Math.PI) / 180,
+      2
+    );
     const evalEn03 = helicalFamily.createEvaluator(en03);
     const H = en03.silhouette.height;
     // Bottom rim (v = 0) must have 0 rib protrusion so shade aligns 100% flush with Ø 112 mm cylinder base!

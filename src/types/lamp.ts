@@ -216,7 +216,7 @@ export interface OrigamiParams {
   invertFolds?: boolean;
 }
 
-export type WovenPattern = 'basket_1x1' | 'knitted' | 'ripple_mesh' | 'grid_mesh';
+export type WovenPattern = 'basket_1x1' | 'knitted' | 'ripple_mesh' | 'grid_mesh' | 'open_lattice';
 
 export interface WovenParams {
   horizFreq: number; // 16 - 72 (24 - 44 for RippleMesh / Grid)
