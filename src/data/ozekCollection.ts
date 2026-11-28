@@ -222,8 +222,8 @@ function buildEn03(): LampConfig {
 
 /**
  * 4) KŌBŌ 04 · 工房 (Taller de Autor)
- * Silueta trapezoidal arquitectónica con hombro diagonal a 45° + Celosía Calada REAL con huecos pasantes
- * (18 barras cruzadas a ±45° por sentido, sección ~2.0 × 2.4 mm, 0% soportes) en Gris Ónice (#252525)
+ * Silueta trapezoidal arquitectónica con hombro diagonal a 45° + Celosía Calada REAL fina y tupida
+ * (36 barras cruzadas a ±45° por sentido, sección ~1.6 × 2.2 mm, 0% soportes) en Gris Ónice (#252525)
  * con Doble Difusor Interno blanco Arena (1.0 mm) visible físicamente a través de la malla, al ras de la base (r=48 mm).
  */
 function buildKobo04(): LampConfig {
@@ -248,8 +248,8 @@ function buildKobo04(): LampConfig {
   cfg.silhouette.includeDiffuser = true; // Doble Difusor Interno 1.0 mm Arena visible físicamente a través de la celosía!
   cfg.silhouette.buildMode = 'two_part';
 
-  cfg.woven.pattern = 'open_lattice'; // Celosía Calada REAL con rombos pasantes!
-  cfg.woven.horizFreq = 18; // 18 barras diagonales por sentido (+45° / -45°)
+  cfg.woven.pattern = 'open_lattice'; // Celosía Calada REAL con rombos pasantes finos y tupidos!
+  cfg.woven.horizFreq = 36; // 36 barras diagonales por sentido (+45° / -45°, 1.6 × 2.2 mm)
   cfg.woven.vertFreq = 14;
   cfg.woven.rippleDepth = 5.5;
   cfg.woven.fdmSmoothing = 0.35;
@@ -326,10 +326,10 @@ export const OZEK_SIGNATURE_COLLECTION: OzekSignaturePiece[] = [
     kanji: '工房',
     title: 'Taller de Autor',
     narrative: 'Artesanía táctil con doble profundidad luminosa.',
-    subtitle: 'Trapezoide 45° · Celosía Calada 18 barras + Difusor Arena · M 175 mm',
+    subtitle: 'Trapezoide 45° · Celosía Calada 36 barras + Difusor Arena · M 175 mm',
     badge: '0% soportes · Celosía calada',
     dfmSupportNote:
-      'KŌBŌ 04: 0% soportes en Base, Pantalla de Celosía Calada real (18 barras cruzadas a ≤ 45° con rombos pasantes) y Difusor Interno (1.0 mm Arena).',
+      'KŌBŌ 04: 0% soportes en Base, Pantalla de Celosía Calada fina (36 barras cruzadas a ≤ 45°, 1.6 × 2.2 mm con rombos pasantes) y Difusor Interno (1.0 mm Arena).',
     swatches: ['#252525', '#C87D55'],
     config: buildKobo04(),
   },

@@ -737,23 +737,30 @@ function buildRealOrigamiShade(
   return mb;
 }
 
+interface PerforatedFrameInfo {
+  shadeHeight: number;
+  rHubOut: number;
+  bottomRingH: number;
+  topRingH: number;
+  ringWallThick: number;
+  rMax: number;
+  sampleOuterR: (theta: number, v: number) => number;
+}
+
 /**
- * Real Perforated Open-Lattice Shade ("Celosía Calada — Huecos Reales", KŌBŌ 04):
- * Builds a 100% watertight 2-manifold perforated lattice shade with genuine physical through-holes:
- *  - Component 1a: Solid bottom outer binding ring (anchored flush onto the base drum)
- *  - Component 1b: Smooth circular female coupling hub (bayonet / thread / etc.) embedded into bottom ring
+ * Shared watertight 2-manifold frame & mechanical coupling hub for all real perforated shades
+ * (`open_lattice`, `grid_mesh`, `ripple_mesh`):
+ *  - Component 1a: Solid bottom outer binding ring (flush onto base drum)
+ *  - Component 1b: Smooth circular female coupling hub (bayonet / thread / slender_e26 / etc.)
  *  - Component 2 : Solid clean top binding ring
- *  - Components 3 & 4: Two opposing families of K (16–22) continuous helical diagonal bars (+45° / -45°,
- *    ~2.0 mm true width × 2.4 mm thickness, adaptive 3D overhang strictly <= 43° => 0% supports!)
- *    framing wide-open diamond windows through which the white Arena internal diffuser is physically visible!
  */
-function buildOpenLatticeShade(
+function appendPerforatedFrameAndCoupling(
+  mb: SolidMeshBuilder,
   config: LampConfig,
   seatY: number,
   draft: boolean
-): SolidMeshBuilder {
-  const mb = new SolidMeshBuilder();
-  const { silhouette, base, woven, mount } = config;
+): PerforatedFrameInfo {
+  const { silhouette, base, mount } = config;
   const shadeHeight = getEffectiveShadeHeight(silhouette);
   const wallT = clamp(mount.wallThickness, 1.6, 3.2);
 
@@ -788,9 +795,6 @@ function buildOpenLatticeShade(
   const bottomRingH = Math.max(deckH + 3.8, 7.5);
   const topRingH = 6.5;
   const ringWallThick = 2.6;
-  const barWidthMm = 2.0; // ~2.0 mm perpendicular bar width
-  const barThickMm = 2.4; // ~2.4 mm radial bar thickness
-  const barCount = Math.max(16, Math.min(22, Math.round(woven.horizFreq || 18)));
 
   const sampleOuterR = (theta: number, v: number): number => {
     const baseR = evaluateSilhouetteRadius(v, silhouette);
@@ -798,6 +802,14 @@ function buildOpenLatticeShade(
     const cs = evaluateCrossSectionMultiplier(theta, v, silhouette, blend);
     return Math.max(rHubOut + ringWallThick + 1.0, baseR * cs);
   };
+
+  // Sample maximum radius across silhouette for physical bridge-span / crossing-node guarantees
+  let rMax = rHubOut + ringWallThick + 1.0;
+  for (let i = 0; i <= 24; i++) {
+    const v = i / 24;
+    const r = Math.max(rHubOut + ringWallThick + 1.0, evaluateSilhouetteRadius(v, silhouette));
+    if (r > rMax) rMax = r;
+  }
 
   // --- Helper: Closed 2-manifold solid silhouette ring spanning [y0, y1] ---
   const appendSolidRing = (y0: number, y1: number, segsN: number, segsV: number): void => {
@@ -918,11 +930,45 @@ function buildOpenLatticeShade(
     }
   }
 
+  return {
+    shadeHeight,
+    rHubOut,
+    bottomRingH,
+    topRingH,
+    ringWallThick,
+    rMax,
+    sampleOuterR,
+  };
+}
+
+/**
+ * Real Perforated Open-Lattice Shade ("Celosía Calada — Huecos Reales", KŌBŌ 04):
+ * Builds a 100% watertight 2-manifold perforated lattice shade with genuine physical through-holes:
+ *  - Bottom/top solid binding rings + smooth circular female coupling hub
+ *  - Two opposing families of K (16–44, KŌBŌ 04 = 36) continuous helical diagonal bars (+45° / -45°,
+ *    adaptive 1.6×2.2 mm for dense >= 30 bars or 2.0×2.4 mm for open < 30 bars, 3D overhang <= 43.2° => 0% supports!)
+ *    framing crisp diamond windows through which the white Arena internal diffuser is physically visible!
+ */
+function buildOpenLatticeShade(
+  config: LampConfig,
+  seatY: number,
+  draft: boolean
+): SolidMeshBuilder {
+  const mb = new SolidMeshBuilder();
+  const { silhouette, woven } = config;
+  const frame = appendPerforatedFrameAndCoupling(mb, config, seatY, draft);
+  const { shadeHeight, rHubOut, bottomRingH, topRingH, ringWallThick } = frame;
+
+  const barCount = Math.max(16, Math.min(44, Math.round(woven.horizFreq || 36)));
+  const isDense = barCount >= 30;
+  const barWidthMm = isDense ? 1.6 : 2.0; // Finer architectural strands at 30–44 bars!
+  const barThickMm = isDense ? 2.2 : 2.4;
+
   // --- Components 3 & 4: Two Opposing Families of Continuous Crossed Helical Bars (+45° / -45°) ---
-  // Each bar embeds 2.5 mm solidly into both the Bottom Ring and Top Ring, with adaptive 3D angle <= 43° (0% supports!).
+  // Each bar embeds 2.5 mm solidly into both the Bottom Ring and Top Ring, with adaptive 3D angle <= 43.2° (0% supports!).
   const yStart = seatY + bottomRingH - 2.5;
   const yEnd = seatY + shadeHeight - topRingH + 2.5;
-  const barSegs = draft ? 28 : 48;
+  const barSegs = isDense ? (draft ? 24 : 36) : draft ? 28 : 48;
   const dy = (yEnd - yStart) / barSegs;
 
   const yArr = new Float64Array(barSegs + 1);
@@ -1004,6 +1050,242 @@ function buildOpenLatticeShade(
 }
 
 /**
+ * Real Perforated Orthogonal Grid Shade ("Rejilla / Grid — Ventanas Cuadradas Reales"):
+ * Builds a 100% watertight 2-manifold architectural orthogonal cage with genuine square through-holes:
+ *  - Bottom/top solid binding rings + smooth circular female coupling hub
+ *  - K continuous vertical ribs (2.0 × 2.4 mm) following the silhouette, automatically enforcing
+ *    clear horizontal bridge spans strictly <= 6.0 mm (pitch <= 7.8 mm) so every horizontal ring prints cleanly without supports!
+ *  - R (12–32) thin horizontal rings (1.8 mm tall × 2.4 mm thick) framing real open square windows.
+ */
+function buildOpenGridShade(
+  config: LampConfig,
+  seatY: number,
+  draft: boolean
+): SolidMeshBuilder {
+  const mb = new SolidMeshBuilder();
+  const { woven } = config;
+  const frame = appendPerforatedFrameAndCoupling(mb, config, seatY, draft);
+  const { shadeHeight, rHubOut, bottomRingH, topRingH, rMax, sampleOuterR } = frame;
+
+  const barWidthMm = 2.0;
+  const barThickMm = 2.4;
+  // Guarantee clear horizontal bridge span <= 6.0 mm between vertical ribs at max silhouette radius (pitch <= 7.8 mm -> gap <= 5.8 mm)
+  const requestedCols = Math.max(16, Math.min(64, Math.round(woven.horizFreq || 48)));
+  const minColsFor6mmBridge = Math.ceil((2 * Math.PI * rMax) / 7.8);
+  const colCount = Math.max(requestedCols, minColsFor6mmBridge);
+
+  const rowCount = Math.max(12, Math.min(32, Math.round(woven.vertFreq || 18)));
+  const ringHeightMm = 1.8;
+
+  // 1. K continuous vertical ribs embedded 2.2 mm into both bottom & top solid rings
+  const yStart = seatY + bottomRingH - 2.2;
+  const yEnd = seatY + shadeHeight - topRingH + 2.2;
+  const barSegs = draft ? 20 : 32;
+
+  for (let k = 0; k < colCount; k++) {
+    const thetaC = (2 * Math.PI * k) / colCount;
+    const v0Ring = new Int32Array(barSegs + 1);
+    const v1Ring = new Int32Array(barSegs + 1);
+    const v2Ring = new Int32Array(barSegs + 1);
+    const v3Ring = new Int32Array(barSegs + 1);
+
+    for (let j = 0; j <= barSegs; j++) {
+      const yWorld = yStart + ((yEnd - yStart) * j) / barSegs;
+      const v = clamp((yWorld - seatY) / Math.max(shadeHeight, 1), 0, 1);
+      const rOut = sampleOuterR(thetaC, v);
+      const rIn = Math.max(rHubOut + 0.5, rOut - barThickMm);
+      const halfAng = (barWidthMm * 0.5) / Math.max(18, rOut);
+
+      v0Ring[j] = mb.addCyl(rIn, thetaC - halfAng, yWorld, barThickMm);
+      v1Ring[j] = mb.addCyl(rIn, thetaC + halfAng, yWorld, barThickMm);
+      v2Ring[j] = mb.addCyl(rOut, thetaC + halfAng, yWorld, barThickMm);
+      v3Ring[j] = mb.addCyl(rOut, thetaC - halfAng, yWorld, barThickMm);
+    }
+
+    for (let j = 0; j < barSegs; j++) {
+      mb.addQuad(v3Ring[j], v2Ring[j], v2Ring[j + 1], v3Ring[j + 1]);
+      mb.addQuad(v0Ring[j], v0Ring[j + 1], v1Ring[j + 1], v1Ring[j]);
+      mb.addQuad(v2Ring[j], v1Ring[j], v1Ring[j + 1], v2Ring[j + 1]);
+      mb.addQuad(v0Ring[j], v3Ring[j], v3Ring[j + 1], v0Ring[j + 1]);
+    }
+    mb.addQuad(v0Ring[0], v1Ring[0], v2Ring[0], v3Ring[0]);
+    mb.addQuad(v0Ring[barSegs], v3Ring[barSegs], v2Ring[barSegs], v1Ring[barSegs]);
+  }
+
+  // 2. R thin horizontal rings framing genuine square through-holes (+0.02 mm radial anti-Z-fighting offset)
+  const yOpenStart = seatY + bottomRingH;
+  const yOpenEnd = seatY + shadeHeight - topRingH;
+  const openH = Math.max(16, yOpenEnd - yOpenStart);
+  const ringSegs = Math.max(colCount, draft ? 64 : 96);
+
+  for (let rIdx = 0; rIdx < rowCount; rIdx++) {
+    const yMid = yOpenStart + (openH * (rIdx + 1)) / (rowCount + 1);
+    const yBot = yMid - ringHeightMm * 0.5;
+    const yTop = yMid + ringHeightMm * 0.5;
+    const vBot = clamp((yBot - seatY) / Math.max(shadeHeight, 1), 0, 1);
+    const vTop = clamp((yTop - seatY) / Math.max(shadeHeight, 1), 0, 1);
+
+    const outBot = new Int32Array(ringSegs);
+    const outTop = new Int32Array(ringSegs);
+    const inBot = new Int32Array(ringSegs);
+    const inTop = new Int32Array(ringSegs);
+
+    for (let u = 0; u < ringSegs; u++) {
+      const theta = (2 * Math.PI * u) / ringSegs;
+      const rOutB = sampleOuterR(theta, vBot) + 0.02;
+      const rInB = Math.max(rHubOut + 0.5, rOutB - barThickMm);
+      const rOutT = sampleOuterR(theta, vTop) + 0.02;
+      const rInT = Math.max(rHubOut + 0.5, rOutT - barThickMm);
+
+      outBot[u] = mb.addCyl(rOutB, theta, yBot, barThickMm);
+      outTop[u] = mb.addCyl(rOutT, theta, yTop, barThickMm);
+      inBot[u] = mb.addCyl(rInB, theta, yBot, barThickMm);
+      inTop[u] = mb.addCyl(rInT, theta, yTop, barThickMm);
+    }
+
+    for (let s = 0; s < ringSegs; s++) {
+      const u0 = s;
+      const u1 = (s + 1) % ringSegs;
+      mb.addQuad(outBot[u0], outBot[u1], outTop[u1], outTop[u0]); // Outer (+r)
+      mb.addQuad(inBot[u0], inTop[u0], inTop[u1], inBot[u1]); // Inner (-r)
+      mb.addQuad(inTop[u0], outTop[u0], outTop[u1], inTop[u1]); // Top (+Y)
+      mb.addQuad(inBot[u0], inBot[u1], outBot[u1], outBot[u0]); // Bottom (-Y)
+    }
+  }
+
+  return mb;
+}
+
+/**
+ * Real Perforated Counter-Phased RippleMesh Shade ("RippleMesh Calado — Ventanas Pasantes Reales"):
+ * Builds a 100% watertight 2-manifold open wavy lattice with genuine physical through-windows:
+ *  - Bottom/top solid binding rings + smooth circular female coupling hub
+ *  - R (12–32) counter-phased wavy horizontal rings: r_j(theta) = rSil(v_j) + A * (-1)^j * cos(W * theta)
+ *    with radial amplitude A in [1.4, 2.4] mm.
+ *  - Guaranteed horizontal crossing-node spacing strictly <= 7.5 mm (`W_eff >= ceil(pi * rMax / 7.5)`)
+ *    anchored by 2*W continuous slim vertical crossing-node pillars at theta_k = ((k + 0.5) * pi) / W
+ *    so every curved bridge segment prints clean with zero sagging on Bambu Lab A1!
+ */
+function buildOpenRippleMeshShade(
+  config: LampConfig,
+  seatY: number,
+  draft: boolean
+): SolidMeshBuilder {
+  const mb = new SolidMeshBuilder();
+  const { woven } = config;
+  const frame = appendPerforatedFrameAndCoupling(mb, config, seatY, draft);
+  const { shadeHeight, rHubOut, bottomRingH, topRingH, rMax, sampleOuterR } = frame;
+
+  // Enforce crossing-node horizontal spacing <= 7.5 mm at max radius: arc = (pi * rMax) / W <= 7.5 mm
+  const requestedW = Math.max(24, Math.min(48, Math.round(woven.horizFreq || 32)));
+  const minWFor75mm = Math.ceil((Math.PI * rMax) / 7.5);
+  const waveCount = Math.max(requestedW, minWFor75mm);
+
+  const rowCount = Math.max(12, Math.min(32, Math.round(woven.vertFreq || 18)));
+  // Map rippleDepth [3.5, 6.5] -> clean printable wave amplitude A in [1.4, 2.4] mm
+  const waveAmpMm = clamp(1.4 + (((woven.rippleDepth ?? 4.8) - 3.5) / 3.0) * 1.0, 1.4, 2.4);
+
+  const yOpenStart = seatY + bottomRingH;
+  const yOpenEnd = seatY + shadeHeight - topRingH;
+  const openH = Math.max(20, yOpenEnd - yOpenStart);
+  const rowPitch = openH / (rowCount + 1);
+  const ringHeightMm = clamp(rowPitch * 0.44, 1.8, 2.8);
+  const ringThickMm = 1.6;
+
+  // 1. 2*W crossing-node weld pillars at every exact zero-crossing theta_k = ((k + 0.5) * pi) / W
+  //    (1.6 mm wide × 1.56 mm thick -> -0.02 mm radial anti-Z-fighting inset inside the 1.60 mm wavy rings!)
+  const nodeCount = waveCount * 2;
+  const nodeWidthMm = 1.6;
+  const nodeThickMm = 1.56;
+  const yNodeStart = yOpenStart - 2.0;
+  const yNodeEnd = yOpenEnd + 2.0;
+  const nodeSegs = draft ? 16 : 24;
+
+  for (let k = 0; k < nodeCount; k++) {
+    const thetaK = ((k + 0.5) * Math.PI) / waveCount;
+    const v0Ring = new Int32Array(nodeSegs + 1);
+    const v1Ring = new Int32Array(nodeSegs + 1);
+    const v2Ring = new Int32Array(nodeSegs + 1);
+    const v3Ring = new Int32Array(nodeSegs + 1);
+
+    for (let j = 0; j <= nodeSegs; j++) {
+      const yWorld = yNodeStart + ((yNodeEnd - yNodeStart) * j) / nodeSegs;
+      const v = clamp((yWorld - seatY) / Math.max(shadeHeight, 1), 0, 1);
+      const rSil = sampleOuterR(thetaK, v);
+      const rMid = Math.max(rHubOut + 0.6 + ringThickMm * 0.5, rSil - ringThickMm * 0.5);
+      const rOut = rMid + nodeThickMm * 0.5;
+      const rIn = rMid - nodeThickMm * 0.5;
+      const halfAng = (nodeWidthMm * 0.5) / Math.max(18, rOut);
+
+      v0Ring[j] = mb.addCyl(rIn, thetaK - halfAng, yWorld, nodeThickMm);
+      v1Ring[j] = mb.addCyl(rIn, thetaK + halfAng, yWorld, nodeThickMm);
+      v2Ring[j] = mb.addCyl(rOut, thetaK + halfAng, yWorld, nodeThickMm);
+      v3Ring[j] = mb.addCyl(rOut, thetaK - halfAng, yWorld, nodeThickMm);
+    }
+
+    for (let j = 0; j < nodeSegs; j++) {
+      mb.addQuad(v3Ring[j], v2Ring[j], v2Ring[j + 1], v3Ring[j + 1]);
+      mb.addQuad(v0Ring[j], v0Ring[j + 1], v1Ring[j + 1], v1Ring[j]);
+      mb.addQuad(v2Ring[j], v1Ring[j], v1Ring[j + 1], v2Ring[j + 1]);
+      mb.addQuad(v0Ring[j], v3Ring[j], v3Ring[j + 1], v0Ring[j + 1]);
+    }
+    mb.addQuad(v0Ring[0], v1Ring[0], v2Ring[0], v3Ring[0]);
+    mb.addQuad(v0Ring[nodeSegs], v3Ring[nodeSegs], v2Ring[nodeSegs], v1Ring[nodeSegs]);
+  }
+
+  // 2. R counter-phased wavy horizontal rings: samplesPerWave = 4 (draft) or 8 (final) hits EVERY crest AND crossing node exactly!
+  const samplesPerWave = draft ? 4 : 8;
+  const ringSegs = waveCount * samplesPerWave;
+
+  for (let rIdx = 0; rIdx < rowCount; rIdx++) {
+    const phaseSign = (rIdx & 1) === 0 ? 1 : -1;
+    const yMid = yOpenStart + rowPitch * (rIdx + 1);
+    const yBot = yMid - ringHeightMm * 0.5;
+    const yTop = yMid + ringHeightMm * 0.5;
+    const vBot = clamp((yBot - seatY) / Math.max(shadeHeight, 1), 0, 1);
+    const vTop = clamp((yTop - seatY) / Math.max(shadeHeight, 1), 0, 1);
+
+    const outBot = new Int32Array(ringSegs);
+    const outTop = new Int32Array(ringSegs);
+    const inBot = new Int32Array(ringSegs);
+    const inTop = new Int32Array(ringSegs);
+
+    for (let u = 0; u < ringSegs; u++) {
+      const theta = (2 * Math.PI * u) / ringSegs;
+      const cosW = Math.cos(waveCount * theta);
+
+      const rSilB = sampleOuterR(theta, vBot);
+      const safeAmpB = Math.min(waveAmpMm, Math.max(0.3, rSilB - ringThickMm - (rHubOut + 0.6)));
+      const rMidB = rSilB - ringThickMm * 0.5 + safeAmpB * phaseSign * cosW;
+      const rOutB = rMidB + ringThickMm * 0.5;
+      const rInB = rMidB - ringThickMm * 0.5;
+
+      const rSilT = sampleOuterR(theta, vTop);
+      const safeAmpT = Math.min(waveAmpMm, Math.max(0.3, rSilT - ringThickMm - (rHubOut + 0.6)));
+      const rMidT = rSilT - ringThickMm * 0.5 + safeAmpT * phaseSign * cosW;
+      const rOutT = rMidT + ringThickMm * 0.5;
+      const rInT = rMidT - ringThickMm * 0.5;
+
+      outBot[u] = mb.addCyl(rOutB, theta, yBot, ringThickMm);
+      outTop[u] = mb.addCyl(rOutT, theta, yTop, ringThickMm);
+      inBot[u] = mb.addCyl(rInB, theta, yBot, ringThickMm);
+      inTop[u] = mb.addCyl(rInT, theta, yTop, ringThickMm);
+    }
+
+    for (let s = 0; s < ringSegs; s++) {
+      const u0 = s;
+      const u1 = (s + 1) % ringSegs;
+      mb.addQuad(outBot[u0], outBot[u1], outTop[u1], outTop[u0]); // Outer (+r)
+      mb.addQuad(inBot[u0], inTop[u0], inTop[u1], inBot[u1]); // Inner (-r)
+      mb.addQuad(inTop[u0], outTop[u0], outTop[u1], inTop[u1]); // Top (+Y)
+      mb.addQuad(inBot[u0], inBot[u1], outBot[u1], outBot[u0]); // Bottom (-Y)
+    }
+  }
+
+  return mb;
+}
+
+/**
  * Builds the independent SHADE part for Two-Part Lamp mode!
  * v2.0 FDM Upgrade:
  *  - When `coupling === 'spider'`, the 4 thin (3 mm) radial spider arms slope UPWARD at **45°**
@@ -1017,14 +1299,21 @@ function buildCoupledShade(
   heightSegs: number,
   draft: boolean
 ): SolidMeshBuilder {
-  // Real Perforated Open-Lattice mode ("Celosía Calada — Huecos Reales", KŌBŌ 04!)
+  // Real Perforated Modes ("Celosía Calada", "Rejilla (Grid)", "RippleMesh Calado" — Huecos Pasantes Reales!)
   if (
     config.family === 'woven' &&
-    config.woven.pattern === 'open_lattice' &&
     !config.silhouette.closeTopDome &&
     (config.silhouette.skirtWaveAmp ?? 0) <= 0.15
   ) {
-    return buildOpenLatticeShade(config, seatY, draft);
+    if (config.woven.pattern === 'open_lattice') {
+      return buildOpenLatticeShade(config, seatY, draft);
+    }
+    if (config.woven.pattern === 'grid_mesh') {
+      return buildOpenGridShade(config, seatY, draft);
+    }
+    if (config.woven.pattern === 'ripple_mesh') {
+      return buildOpenRippleMeshShade(config, seatY, draft);
+    }
   }
   // Real flat-triangle low-poly Yoshimura Origami mode (exact 2*horizFacets × 2*vertTiers facets + circular coupling hub!)
   if (
@@ -1207,11 +1496,12 @@ function buildCoupledShade(
   const ANCHOR_END = S_LOW + D;
   const minInnerAtBottom = canVent ? rHubOut + 5.5 : rHubOut + 1.2;
 
-  // CAD Helix-Aligned Mesh Grid: when a family defines axial twist (e.g. EN 03 helical spiral),
-  // progressively rotate the mesh rings themselves along the helix (thetaWorld = thetaBase - twistAtV)
-  // and evaluate the rib wave on thetaBase -> ZERO sawtooth aliasing & razor-sharp industrial CAD edges!
-  const axialTwistRad = getLampFamily(config.family).getAxialTwistRad?.(config) ?? 0;
-  const useHelixGrid = Math.abs(axialTwistRad) > 1e-4 && !useSlopedSpider;
+  // CAD Helix/S-Curve-Aligned Mesh Grid: when a family defines axial twist (e.g. EN 03 helical spiral or louvers),
+  // progressively rotate the mesh rings themselves along the exact twist curve (thetaWorld = thetaBase - twist(v))
+  // and evaluate the rib/fin wave on thetaBase -> ZERO sawtooth aliasing & razor-sharp industrial CAD edges!
+  const activeFamilyDef = getLampFamily(config.family);
+  const hasAxialTwist = Math.abs(activeFamilyDef.getAxialTwistRad?.(config, 1) ?? 0) > 1e-4;
+  const useHelixGrid = hasAxialTwist && !useSlopedSpider;
 
   // 1. Allocate outer & inner shade shell rings
   const isClosedPole = Boolean(silhouette.closeTopDome) && mount.type === 'led_kit_001';
@@ -1226,7 +1516,9 @@ function buildCoupledShade(
     // Keep bottom anchor band (0..deckH) 100% untwisted for exact alignment with circular bayonet hub!
     const vTwist =
       yLocal <= deckH ? 0 : clamp((yLocal - deckH) / Math.max(1, shadeHeight - deckH), 0, 1);
-    const ringTwistOffset = useHelixGrid ? -axialTwistRad * vTwist : 0;
+    const ringTwistOffset = useHelixGrid
+      ? -(activeFamilyDef.getAxialTwistRad?.(config, vTwist) ?? 0)
+      : 0;
     const oArr = new Int32Array(N);
     const iArr = new Int32Array(N);
     for (let u = 0; u < N; u++) {
@@ -1472,10 +1764,14 @@ function buildInternalDiffuser(
     if (v >= 0.2 && r < minUpperShadeIn) minUpperShadeIn = r;
   }
 
-  const isOpenLattice = config.family === 'woven' && config.woven.pattern === 'open_lattice';
+  const isPerforated =
+    config.family === 'woven' &&
+    (config.woven.pattern === 'open_lattice' ||
+      config.woven.pattern === 'grid_mesh' ||
+      config.woven.pattern === 'ripple_mesh');
   const rSeatOut = Math.max(18, Math.min(baseInnerBore - 0.35, minShadeIn));
-  // For KŌBŌ 04 Open Lattice, flare at 45° (0% supports!) to a generous glowing Arena cylinder clearly visible behind the black mesh!
-  const rBodyOut = isOpenLattice
+  // For perforated modes (Open Lattice / Grid / RippleMesh), flare at 45° (0% supports!) to a generous glowing Arena cylinder clearly visible behind the mesh!
+  const rBodyOut = isPerforated
     ? Math.max(rSeatOut, Math.min(minUpperShadeIn - 6.0, 44.0))
     : Math.max(18, Math.min(rNeck - 2.0, minShadeIn));
   const rBodyIn = Math.max(16, rBodyOut - wallT);
@@ -1484,7 +1780,7 @@ function buildInternalDiffuser(
   const collarClearY = mount.type === 'led_kit_001' ? getCouplingHeightMm(config.base) : 0;
   const diffHeight = Math.max(
     50,
-    getEffectiveShadeHeight(silhouette) * (isOpenLattice ? 0.9 : 0.86) - collarClearY
+    getEffectiveShadeHeight(silhouette) * (isPerforated ? 0.9 : 0.86) - collarClearY
   );
   const yStart = seatY + collarClearY;
   const ySeatStep = yStart + 4.5;

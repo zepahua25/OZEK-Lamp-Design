@@ -59,8 +59,8 @@ export interface LampFamilyDefinition {
   createEvaluator(config: LampConfig): (ctx: DisplacementContext) => DisplacementResult;
   /** Optional post-pass to append watertight sculpted fins/ribbons anchored into the smooth diffuser core */
   appendExtraGeometry?(ctx: ExtraGeometryContext): void;
-  /** Optional axial twist in radians so solidBuilder rotates mesh rings directly along the helix (CAD-grade zero aliasing!) */
-  getAxialTwistRad?(config: LampConfig): number;
+  /** Optional axial twist in radians at normalized height v in [0, 1] (default v = 1) so solidBuilder rotates mesh rings directly along the helix/S-curve (CAD-grade zero aliasing!) */
+  getAxialTwistRad?(config: LampConfig, v?: number): number;
   /** Whether bottom spoked ventilation is requested for this family */
   wantsBottomVentilation?(config: LampConfig): boolean;
 }

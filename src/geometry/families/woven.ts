@@ -55,9 +55,12 @@ export const wovenFamily: LampFamilyDefinition = {
     }
     const isCellMode =
       config.woven.pattern === 'ripple_mesh' || config.woven.pattern === 'grid_mesh';
-    const hf = isCellMode
-      ? Math.round(clamp(config.woven.horizFreq, 16, 44))
-      : Math.round(clamp(config.woven.horizFreq, 16, 72));
+    const hf =
+      config.woven.pattern === 'grid_mesh'
+        ? Math.round(clamp(config.woven.horizFreq, 16, 64))
+        : config.woven.pattern === 'ripple_mesh'
+          ? Math.round(clamp(config.woven.horizFreq, 16, 48))
+          : Math.round(clamp(config.woven.horizFreq, 16, 72));
     const vf = isCellMode
       ? Math.round(clamp(config.woven.vertFreq, 12, 32))
       : Math.round(clamp(config.woven.vertFreq, 24, 90));

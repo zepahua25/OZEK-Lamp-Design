@@ -13,11 +13,21 @@ export const louversFamily: LampFamilyDefinition = {
   tagline: 'Aletas escultóricas fluidas alrededor de un difusor interno luminoso',
 
   getResolution(config: LampConfig, draft: boolean) {
-    const fins = Math.round(config.louvers.finCount);
-    // High angular sampling (7-8 verts per fin) so each sculptural blade is razor crisp
-    const radialSegs = Math.min(384, Math.max(draft ? 140 : 256, fins * (draft ? 5 : 8)));
+    const n = Math.max(16, Math.min(56, Math.round(config.louvers.finCount)));
+    // CAD exact even integer multiple of finCount (4 in draft, 8 or 6 in final) — ZERO destructive clamp aliasing!
+    const perFin = draft ? 4 : n * 8 <= 448 ? 8 : 6;
+    const radialSegs = n * perFin;
     const heightSegs = draft ? 68 : 136;
     return { radialSegs, heightSegs };
+  },
+
+  getAxialTwistRad(config: LampConfig, v = 1): number {
+    const n = Math.max(16, Math.min(56, Math.round(config.louvers.finCount)));
+    const deg = config.louvers.sweepDeg || 0;
+    if (Math.abs(deg) < 0.01) return 0;
+    const totalSweepRad = (deg * Math.PI) / 180;
+    const sCurve = v + 0.14 * Math.sin(v * Math.PI * 2);
+    return (totalSweepRad * sCurve) / n;
   },
 
   createEvaluator(config: LampConfig) {
@@ -31,7 +41,9 @@ export const louversFamily: LampFamilyDefinition = {
       // S-curve organic sweep twist (like Image 5: fluid sweeping flow along height)
       const sCurve = ctx.v + 0.14 * Math.sin(ctx.v * Math.PI * 2);
       const twist = totalSweepRad * sCurve;
-      const phase = ctx.theta * n + twist;
+      // When the mesh grid rings are already S-curve twisted (ctx.gridTwisted === true), evaluate strictly on
+      // thetaBase without adding twist again so every mesh column tracks the exact fin blade!
+      const phase = ctx.gridTwisted ? ctx.theta * n : ctx.theta * n + twist;
 
       // Normalized raised blade in [0, 1]
       const raw = 0.5 + 0.5 * Math.cos(phase);

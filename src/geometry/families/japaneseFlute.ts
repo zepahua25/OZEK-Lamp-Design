@@ -17,11 +17,10 @@ export const japaneseFluteFamily: LampFamilyDefinition = {
   tagline: '40 a 100 pliegues suaves de baja profundidad y pared translúcida (0.8–2.4 mm)',
 
   getResolution(config: LampConfig, draft: boolean) {
-    const count = Math.max(40, Math.min(100, Math.round(config.japaneseFlute.count)));
-    // High angular sampling (5 verts/flute in final, up to 480) so 100 flutes render silky-smooth
-    const radialSegs = draft
-      ? Math.min(260, Math.max(160, count * 3))
-      : Math.min(480, Math.max(300, count * 5));
+    const n = Math.max(40, Math.min(100, Math.round(config.japaneseFlute.count)));
+    // CAD exact even integer multiple of flute count (4 in draft, 6 or 4 in final) — every flute crest & trough lands on a grid edge!
+    const perFold = draft ? 4 : n * 6 <= 480 ? 6 : 4;
+    const radialSegs = n * perFold;
     const heightSegs = draft ? 56 : 104;
     return { radialSegs, heightSegs };
   },

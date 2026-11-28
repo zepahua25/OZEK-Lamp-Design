@@ -1206,12 +1206,19 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                 ]}
                 onChange={(pattern) =>
                   updateWoven(
-                    {
-                      pattern,
-                      horizFreq: Math.min(44, Math.max(16, Math.min(34, config.woven.horizFreq))),
-                      vertFreq: Math.min(32, Math.max(12, Math.min(24, config.woven.vertFreq))),
-                      rippleDepth: config.woven.rippleDepth ?? 5.5,
-                    },
+                    pattern === 'grid_mesh'
+                      ? {
+                          pattern,
+                          horizFreq: Math.min(64, Math.max(24, Math.round(config.woven.horizFreq || 48))),
+                          vertFreq: Math.min(32, Math.max(12, Math.round(config.woven.vertFreq || 18))),
+                          rippleDepth: config.woven.rippleDepth ?? 4.8,
+                        }
+                      : {
+                          pattern,
+                          horizFreq: Math.min(48, Math.max(24, Math.round(config.woven.horizFreq || 32))),
+                          vertFreq: Math.min(32, Math.max(12, Math.round(config.woven.vertFreq || 18))),
+                          rippleDepth: config.woven.rippleDepth ?? 4.8,
+                        },
                     false
                   )
                 }
@@ -1226,7 +1233,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                   updateWoven(
                     {
                       pattern,
-                      horizFreq: Math.min(22, Math.max(16, Math.round(config.woven.horizFreq || 18))),
+                      horizFreq: Math.min(44, Math.max(16, Math.round(config.woven.horizFreq || 36))),
                     },
                     false
                   )
@@ -1245,45 +1252,101 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                 >
                   <div className="font-semibold">Malla Calada Perforada Real (0% soportes)</div>
                   <div className="opacity-80 mt-0.5">
-                    Rombos abiertos de lado a lado entre barras cruzadas a ≤ 45° (2.0 × 2.4 mm).
-                    El Difusor Interno Arena queda visible físicamente a través de la celosía.
+                    Rombos abiertos de lado a lado entre barras cruzadas a ≤ 45° (1.6×2.2 mm en
+                    malla fina ≥30, 2.0×2.4 mm abierta). El Difusor Interno Arena queda visible
+                    físicamente.
                   </div>
                 </div>
                 <StudioSlider
                   label="Barras diagonales por sentido (±45°)"
-                  value={Math.min(22, Math.max(16, Math.round(config.woven.horizFreq || 18)))}
-                  defaultValue={18}
+                  value={Math.min(44, Math.max(16, Math.round(config.woven.horizFreq || 36)))}
+                  defaultValue={36}
                   min={16}
-                  max={22}
+                  max={44}
                   step={1}
                   minLabel="16 (abierta)"
-                  maxLabel="22 (cerrada)"
+                  maxLabel="44 (tupida)"
                   dark={isNight}
                   onChange={(horizFreq) => updateWoven({ horizFreq }, true)}
                   onCommit={onCommitGeometry}
                 />
               </>
-            ) : config.woven.pattern === 'ripple_mesh' || config.woven.pattern === 'grid_mesh' ? (
+            ) : config.woven.pattern === 'grid_mesh' ? (
               <>
+                <div
+                  className={`px-3 py-2 rounded-xl border text-[11px] leading-snug ${
+                    isNight
+                      ? 'bg-emerald-500/10 border-emerald-400/35 text-emerald-100'
+                      : 'bg-emerald-50/80 border-emerald-300/80 text-emerald-950'
+                  }`}
+                >
+                  <div className="font-semibold">
+                    Rejilla Calada Real (Puentes ≤ 6 mm · 0% soportes)
+                  </div>
+                  <div className="opacity-80 mt-0.5">
+                    Ventanas cuadradas pasantes reales con costillas verticales (2.0×2.4 mm) y
+                    anillos finos (1.8 mm). Mínimo automático de columnas garantizado según radio.
+                  </div>
+                </div>
                 <StudioSlider
-                  label={
-                    config.woven.pattern === 'ripple_mesh'
-                      ? 'Ondas radiales (celdas)'
-                      : 'Columnas de rejilla'
-                  }
-                  value={Math.min(44, Math.max(16, config.woven.horizFreq))}
-                  defaultValue={20}
-                  min={16}
-                  max={44}
+                  label="Columnas verticales (puentes ≤ 6 mm)"
+                  value={Math.min(64, Math.max(24, Math.round(config.woven.horizFreq || 48)))}
+                  defaultValue={48}
+                  min={24}
+                  max={64}
                   step={2}
+                  minLabel="24 (auto)"
+                  maxLabel="64 (fina)"
                   dark={isNight}
                   onChange={(horizFreq) => updateWoven({ horizFreq }, true)}
                   onCommit={onCommitGeometry}
                 />
                 <StudioSlider
-                  label="Filas verticales de celdas"
-                  value={Math.min(32, Math.max(12, config.woven.vertFreq))}
-                  defaultValue={16}
+                  label="Anillos horizontales (filas)"
+                  value={Math.min(32, Math.max(12, Math.round(config.woven.vertFreq || 18)))}
+                  defaultValue={18}
+                  min={12}
+                  max={32}
+                  step={2}
+                  dark={isNight}
+                  onChange={(vertFreq) => updateWoven({ vertFreq }, true)}
+                  onCommit={onCommitGeometry}
+                />
+              </>
+            ) : config.woven.pattern === 'ripple_mesh' ? (
+              <>
+                <div
+                  className={`px-3 py-2 rounded-xl border text-[11px] leading-snug ${
+                    isNight
+                      ? 'bg-emerald-500/10 border-emerald-400/35 text-emerald-100'
+                      : 'bg-emerald-50/80 border-emerald-300/80 text-emerald-950'
+                  }`}
+                >
+                  <div className="font-semibold">
+                    RippleMesh Calado Real (Nodos ≤ 7.5 mm · 0% soportes)
+                  </div>
+                  <div className="opacity-80 mt-0.5">
+                    Anillos ondulados contrafase unidos en nodos de cruce (separación ≤ 7.5 mm) con
+                    ventanas pasantes reales y puentes curvos limpios para Bambu Lab A1.
+                  </div>
+                </div>
+                <StudioSlider
+                  label="Ondas radiales (nodos ≤ 7.5 mm)"
+                  value={Math.min(48, Math.max(24, Math.round(config.woven.horizFreq || 32)))}
+                  defaultValue={32}
+                  min={24}
+                  max={48}
+                  step={2}
+                  minLabel="24 (auto)"
+                  maxLabel="48 (fina)"
+                  dark={isNight}
+                  onChange={(horizFreq) => updateWoven({ horizFreq }, true)}
+                  onCommit={onCommitGeometry}
+                />
+                <StudioSlider
+                  label="Anillos ondulados (filas)"
+                  value={Math.min(32, Math.max(12, Math.round(config.woven.vertFreq || 18)))}
+                  defaultValue={18}
                   min={12}
                   max={32}
                   step={2}
@@ -1292,13 +1355,17 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                   onCommit={onCommitGeometry}
                 />
                 <StudioSlider
-                  label="Profundidad esculpida (arcos ≤ 45°)"
+                  label="Amplitud radial de onda (A)"
                   value={config.woven.rippleDepth ?? 4.8}
                   defaultValue={4.8}
                   min={3.5}
                   max={6.5}
-                  step={0.2}
-                  formatValue={(v) => `0.65 → ${(0.65 + v).toFixed(1)} mm`}
+                  step={0.3}
+                  formatValue={(v) =>
+                    `±${(1.4 + (Math.max(0, Math.min(3, v - 3.5)) / 3.0) * 1.0).toFixed(2)} mm`
+                  }
+                  minLabel="±1.4 mm"
+                  maxLabel="±2.4 mm"
                   dark={isNight}
                   onChange={(rippleDepth) => updateWoven({ rippleDepth }, true)}
                   onCommit={onCommitGeometry}

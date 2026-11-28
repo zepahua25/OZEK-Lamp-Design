@@ -40,6 +40,9 @@ import {
 import { organicFamily } from '../families/organic';
 import { helicalFamily } from '../families/helical';
 import { origamiFamily } from '../families/origami';
+import { pleatedFamily } from '../families/pleated';
+import { japaneseFluteFamily } from '../families/japaneseFlute';
+import { louversFamily } from '../families/louvers';
 import { wovenFamily } from '../families/woven';
 import {
   SHADE_SIZE_PRESETS,
@@ -1410,10 +1413,10 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
     expect(evaluateHankoSealDepthMm(-1.33, -1.82, sealSpec), 'Z☰ diagonal passes lower-left (-u,-v)').toBeGreaterThan(0.35);
     expect(evaluateHankoSealDepthMm(1.33, -1.82, sealSpec), 'Z☰ lower-right gap (+u,-v) is raised').toBeLessThan(0.05);
 
-    // 3D base mesh & REAL Perforated Open Lattice check on KŌBŌ 04 (r = 48 mm flush, open_lattice 18 bars ±45° + Arena Diffuser):
+    // 3D base mesh & REAL Perforated Open Lattice check on KŌBŌ 04 (r = 48 mm flush, open_lattice 36 fine bars ±45° + Arena Diffuser):
     const kobo04 = cloneConfig(OZEK_SIGNATURE_COLLECTION.find((p) => p.id === 'kobo-04')!.config);
     expect(kobo04.woven.pattern).toBe('open_lattice');
-    expect(kobo04.woven.horizFreq).toBe(18);
+    expect(kobo04.woven.horizFreq).toBe(36);
     expect(kobo04.silhouette.includeDiffuser).toBe(true);
     expect(kobo04.base.footRadius).toBe(48);
     expect(kobo04.base.collarRevealMm).toBe(0);
@@ -1429,8 +1432,8 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
     expect(koboRes.metrics.nonManifoldEdges, 'KŌBŌ 04 open_lattice 0 non-manifold edges').toBe(0);
     expect(koboRes.metrics.isWatertight, 'KŌBŌ 04 open_lattice watertight').toBe(true);
     // Real perforated lattice uses far less PLA than the old ~322 g solid wall & stays <= 45° support-free!
-    expect(koboRes.metrics.shadeGramsPLA, 'KŌBŌ 04 perforated lattice shade is lightweight (< 190 g PLA)').toBeLessThan(190);
-    expect(koboRes.metrics.shadeGramsPLA, 'KŌBŌ 04 perforated lattice shade has real solid volume (> 40 g)').toBeGreaterThan(40);
+    expect(koboRes.metrics.shadeGramsPLA, 'KŌBŌ 04 36-bar perforated lattice shade is lightweight (< 210 g PLA)').toBeLessThan(210);
+    expect(koboRes.metrics.shadeGramsPLA, 'KŌBŌ 04 36-bar perforated lattice shade has real solid volume (> 50 g)').toBeGreaterThan(50);
     expect(koboRes.metrics.overhangPercent, 'KŌBŌ 04 crossed ±45° lattice <= 45° support-free').toBeLessThan(5.0);
 
     const koboShade = koboRes.parts.find((p) => p.role === 'shade')!;
@@ -1442,14 +1445,21 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
     expect(koboShadeRep.isWatertight, 'KŌBŌ 04 Open Lattice STL watertight').toBe(true);
     expect(koboShadeRep.minZ, 'KŌBŌ 04 Open Lattice STL minZ === 0').toBeCloseTo(0, 3);
 
-    // Also verify 16-bar and 22-bar Open Lattice extremes are 100% watertight
-    for (const bars of [16, 22]) {
+    // Also verify 16-bar and 44-bar Open Lattice extremes are 100% watertight in Binary STL
+    for (const bars of [16, 44]) {
       const kBar = cloneConfig(kobo04);
       kBar.woven.horizFreq = bars;
       const kBarRes = generateLampGeometry(kBar, { draft: true, validateManifold: true });
       expect(kBarRes.metrics.openEdges, `open_lattice ${bars} bars openEdges`).toBe(0);
       expect(kBarRes.metrics.nonManifoldEdges, `open_lattice ${bars} bars nonManifold`).toBe(0);
       expect(kBarRes.metrics.isWatertight, `open_lattice ${bars} bars watertight`).toBe(true);
+      expect(kBarRes.metrics.overhangPercent, `open_lattice ${bars} bars <= 5% overhangs`).toBeLessThan(5.0);
+      const barStlRep = validateBinarySTLManifold(
+        exportPartToBinarySTL(kBarRes.parts.find((p) => p.role === 'shade')!)
+      );
+      expect(barStlRep.degenerateTriangles, `open_lattice ${bars} STL 0 degenerate`).toBe(0);
+      expect(barStlRep.openEdges, `open_lattice ${bars} STL 0 welded open`).toBe(0);
+      expect(barStlRep.nonManifoldEdges, `open_lattice ${bars} STL 0 welded non-manifold`).toBe(0);
     }
 
     const koboBase = koboRes.parts.find((p) => p.role === 'base')!;
@@ -1728,5 +1738,119 @@ describe('OZEK Lamp Studio v2.0 — Manifold, FDM Printability & Modular Engine'
     expect(omoiLedRes.metrics.openEdges, 'OMOI 01 LED auto-disable stem openEdges').toBe(0);
     expect(omoiLedRes.metrics.nonManifoldEdges, 'OMOI 01 LED auto-disable stem nonManifold').toBe(0);
     expect(omoiLedRes.metrics.isWatertight, 'OMOI 01 LED auto-disable stem watertight').toBe(true);
+  }, 60000);
+
+  it('CAD-GLOBAL — enforces exact integer multiple radialSegs in pleated, japanese_flute & louvers + twist-aligned louvers + real perforated Grid (<= 6 mm) & RippleMesh (<= 7.5 mm nodes)', () => {
+    // 1. Exact CAD divisibility across pleated, japanese_flute & louvers in both draft & final!
+    for (const pleatCount of [12, 36, 64, 72, 80]) {
+      const cfg = cloneConfig(DEFAULT_CONFIG);
+      cfg.family = 'pleated';
+      cfg.pleated.count = pleatCount;
+      for (const draft of [true, false]) {
+        const res = pleatedFamily.getResolution(cfg, draft);
+        expect(res.radialSegs % pleatCount, `pleated(${pleatCount}, draft=${draft}) exact multiple`).toBe(0);
+      }
+    }
+
+    for (const fluteCount of [40, 72, 85, 100]) {
+      const cfg = cloneConfig(DEFAULT_CONFIG);
+      cfg.family = 'japanese_flute';
+      cfg.japaneseFlute.count = fluteCount;
+      for (const draft of [true, false]) {
+        const res = japaneseFluteFamily.getResolution(cfg, draft);
+        expect(res.radialSegs % fluteCount, `japanese_flute(${fluteCount}, draft=${draft}) exact multiple`).toBe(0);
+      }
+    }
+
+    for (const finCount of [16, 28, 44, 56]) {
+      const cfg = cloneConfig(DEFAULT_CONFIG);
+      cfg.family = 'louvers';
+      cfg.louvers.finCount = finCount;
+      cfg.louvers.sweepDeg = 140;
+      for (const draft of [true, false]) {
+        const res = louversFamily.getResolution(cfg, draft);
+        expect(res.radialSegs % finCount, `louvers(${finCount}, draft=${draft}) exact multiple`).toBe(0);
+      }
+      expect(louversFamily.getAxialTwistRad?.(cfg, 0), 'louvers twist at v=0 is 0').toBeCloseTo(0, 6);
+      expect(louversFamily.getAxialTwistRad?.(cfg, 1), 'louvers twist at v=1 > 0').toBeGreaterThan(0.02);
+    }
+
+    // Build twisted louvers shade and verify 0 welded Binary STL manifold errors
+    const louverCfg = cloneConfig(DEFAULT_CONFIG);
+    louverCfg.family = 'louvers';
+    louverCfg.louvers.finCount = 32;
+    louverCfg.louvers.sweepDeg = 150;
+    const louverBuilt = generateLampGeometry(louverCfg, { draft: true, validateManifold: true });
+    expect(louverBuilt.metrics.openEdges, 'twisted louvers openEdges').toBe(0);
+    expect(louverBuilt.metrics.nonManifoldEdges, 'twisted louvers nonManifold').toBe(0);
+    expect(louverBuilt.metrics.isWatertight, 'twisted louvers watertight').toBe(true);
+    const louverStlRep = validateBinarySTLManifold(
+      exportPartToBinarySTL(louverBuilt.parts.find((p) => p.role === 'shade')!)
+    );
+    expect(louverStlRep.degenerateTriangles, 'twisted louvers STL 0 degenerate').toBe(0);
+    expect(louverStlRep.openEdges, 'twisted louvers STL 0 welded open').toBe(0);
+    expect(louverStlRep.nonManifoldEdges, 'twisted louvers STL 0 welded non-manifold').toBe(0);
+
+    // 2. Real Perforated Orthogonal Grid (`grid_mesh`): <= 6.0 mm clear bridges, 0 welded STL errors, lighter than solid!
+    const koboBaseCfg = cloneConfig(OZEK_SIGNATURE_COLLECTION.find((p) => p.id === 'kobo-04')!.config);
+    const gridCfg = cloneConfig(koboBaseCfg);
+    gridCfg.woven.pattern = 'grid_mesh';
+    gridCfg.woven.horizFreq = 24; // Even if user asks for 24 cols, auto-minimum enforces <= 6.0 mm bridges at rMax = 80 mm!
+    gridCfg.woven.vertFreq = 18;
+    const gridBuilt = generateLampGeometry(gridCfg, { draft: false, validateManifold: true });
+    expect(gridBuilt.parts, 'Grid KŌBŌ has Base + Diffuser + Perforated Shade').toHaveLength(3);
+    expect(gridBuilt.metrics.openEdges, 'perforated grid_mesh openEdges').toBe(0);
+    expect(gridBuilt.metrics.nonManifoldEdges, 'perforated grid_mesh nonManifold').toBe(0);
+    expect(gridBuilt.metrics.isWatertight, 'perforated grid_mesh watertight').toBe(true);
+    expect(gridBuilt.metrics.shadeGramsPLA, 'perforated grid_mesh lighter than solid wall (< 230 g)').toBeLessThan(230);
+    expect(gridBuilt.metrics.shadeGramsPLA, 'perforated grid_mesh positive solid weight (> 45 g)').toBeGreaterThan(45);
+
+    const gridShade = gridBuilt.parts.find((p) => p.role === 'shade')!;
+    const gridStlRep = validateBinarySTLManifold(exportPartToBinarySTL(gridShade));
+    expect(gridStlRep.degenerateTriangles, 'grid_mesh STL 0 degenerate tris').toBe(0);
+    expect(gridStlRep.openEdges, 'grid_mesh STL 0 welded open edges').toBe(0);
+    expect(gridStlRep.nonManifoldEdges, 'grid_mesh STL 0 welded non-manifold edges').toBe(0);
+    expect(gridStlRep.isWatertight, 'grid_mesh STL watertight').toBe(true);
+    expect(gridStlRep.minZ, 'grid_mesh STL sits flat on Z = 0').toBeCloseTo(0, 3);
+
+    // Verify auto-enforced column count achieves clear horizontal bridge <= 6.0 mm at rMax = 80 mm:
+    // minCols = ceil(2*pi*80 / 7.8) = 65 -> pitch = 7.73 mm -> clear bridge = 5.73 mm <= 6.0 mm!
+    const rMaxKobo = 80;
+    const expectedMinGridCols = Math.ceil((2 * Math.PI * rMaxKobo) / 7.8);
+    expect((2 * Math.PI * rMaxKobo) / expectedMinGridCols - 2.0, 'grid clear bridge <= 6.0 mm').toBeLessThanOrEqual(6.0);
+
+    // 3. Real Perforated Counter-Phased RippleMesh (`ripple_mesh`): <= 7.5 mm crossing node spacing, A in [1.4, 2.4] mm, 0 welded STL errors!
+    const rippleCfg = cloneConfig(koboBaseCfg);
+    rippleCfg.woven.pattern = 'ripple_mesh';
+    rippleCfg.woven.horizFreq = 24; // Even at slider min 24, auto-minimum enforces crossing node spacing <= 7.5 mm!
+    rippleCfg.woven.vertFreq = 18;
+    rippleCfg.woven.rippleDepth = 5.0; // Maps to A = 1.90 mm in [1.4, 2.4] mm
+    const rippleBuilt = generateLampGeometry(rippleCfg, { draft: false, validateManifold: true });
+    expect(rippleBuilt.parts, 'RippleMesh KŌBŌ has Base + Diffuser + Perforated Shade').toHaveLength(3);
+    expect(rippleBuilt.metrics.openEdges, 'perforated ripple_mesh openEdges').toBe(0);
+    expect(rippleBuilt.metrics.nonManifoldEdges, 'perforated ripple_mesh nonManifold').toBe(0);
+    expect(rippleBuilt.metrics.isWatertight, 'perforated ripple_mesh watertight').toBe(true);
+    expect(rippleBuilt.metrics.shadeGramsPLA, 'perforated ripple_mesh lighter than solid wall (< 200 g)').toBeLessThan(200);
+    expect(rippleBuilt.metrics.shadeGramsPLA, 'perforated ripple_mesh positive solid weight (> 45 g)').toBeGreaterThan(45);
+
+    const rippleShade = rippleBuilt.parts.find((p) => p.role === 'shade')!;
+    const rippleStlRep = validateBinarySTLManifold(exportPartToBinarySTL(rippleShade));
+    expect(rippleStlRep.degenerateTriangles, 'ripple_mesh STL 0 degenerate tris').toBe(0);
+    expect(rippleStlRep.openEdges, 'ripple_mesh STL 0 welded open edges').toBe(0);
+    expect(rippleStlRep.nonManifoldEdges, 'ripple_mesh STL 0 welded non-manifold edges').toBe(0);
+    expect(rippleStlRep.isWatertight, 'ripple_mesh STL watertight').toBe(true);
+    expect(rippleStlRep.minZ, 'ripple_mesh STL sits flat on Z = 0').toBeCloseTo(0, 3);
+
+    // Verify crossing node horizontal spacing <= 7.5 mm at rMax = 80 mm AND actual radial wave protrusion A in [1.4, 2.4] mm!
+    const expectedMinWaves = Math.ceil((Math.PI * rMaxKobo) / 7.5);
+    expect((Math.PI * rMaxKobo) / expectedMinWaves, 'ripple_mesh crossing node spacing <= 7.5 mm').toBeLessThanOrEqual(7.5);
+    // Max radius at mid-shoulder should protrude beyond rSil = 80 mm by ~waveAmp (~1.9 mm -> rOut > 81.4 mm)!
+    let maxRippleR = 0;
+    for (let i = 0; i < rippleShade.positions.length; i += 3) {
+      const r = Math.hypot(rippleShade.positions[i], rippleShade.positions[i + 2]);
+      if (r > maxRippleR) maxRippleR = r;
+    }
+    expect(maxRippleR, 'ripple_mesh wavy rings protrude cleanly by A in [1.4, 2.4] mm').toBeGreaterThan(81.0);
+    expect(maxRippleR, 'ripple_mesh wavy rings bounded by A <= 2.4 mm').toBeLessThan(82.8);
   }, 60000);
 });

@@ -16,11 +16,16 @@ export const pleatedFamily: LampFamilyDefinition = {
   tagline: 'Pliegues arquitectónicos minimalistas con perfiles de onda configurables',
 
   getResolution(config: LampConfig, draft: boolean) {
-    const count = Math.round(config.pleated.count);
-    // At least 6 samples per pleat in final, 4 in draft for sharp crisp ridges
-    const radialSegs = Math.min(360, Math.max(draft ? 112 : 180, count * (draft ? 4 : 6)));
+    const n = Math.max(12, Math.min(80, Math.round(config.pleated.count)));
+    // CAD exact even integer multiple of pleat count (4 in draft, 8 or 6 in final) — ZERO destructive clamp aliasing!
+    const perFold = draft ? 4 : n * 8 <= 480 ? 8 : n * 6 <= 480 ? 6 : 4;
+    const radialSegs = Math.max(48, n * perFold);
     const heightSegs = draft ? 52 : 96;
     return { radialSegs, heightSegs };
+  },
+
+  getAxialTwistRad(): number {
+    return 0;
   },
 
   createEvaluator(config: LampConfig) {

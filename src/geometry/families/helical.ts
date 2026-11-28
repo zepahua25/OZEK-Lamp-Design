@@ -38,11 +38,11 @@ export const helicalFamily: LampFamilyDefinition = {
     return { radialSegs, heightSegs };
   },
 
-  getAxialTwistRad(config: LampConfig): number {
+  getAxialTwistRad(config: LampConfig, v = 1): number {
     if (config.helical.doubleProfile) return 0;
     const deg = config.helical.twistDeg || 0;
     if (Math.abs(deg) < 0.01) return 0;
-    return ((deg * Math.PI) / 180) * config.helical.twistDirection;
+    return ((deg * Math.PI) / 180) * config.helical.twistDirection * v;
   },
 
   wantsBottomVentilation(config: LampConfig): boolean {
